@@ -1,0 +1,95 @@
+# AICostMonitor 配置文件示例
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+# 数据库配置
+database:
+  path: "data/aicost.db"
+  # 可选：SQLite内存模式（仅用于测试）
+  # path: ":memory:"
+
+# AI提供商配置
+providers:
+  # DeepSeek配置
+  deepseek:
+    enabled: true
+    api_key: ""  # 你的DeepSeek API密钥
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    
+    # 价格配置（人民币/千token）
+    pricing:
+      input_tokens: 0.14   # 输入token价格
+      output_tokens: 0.28  # 输出token价格
+      
+    # 支持的模型
+    models:
+      - "deepseek-v3.2"
+      - "deepseek-r1"
+      - "deepseek-coder"
+
+  # OpenAI配置
+  openai:
+    enabled: true
+    api_key: ""  # 你的OpenAI API密钥
+    base_url: "https://api.openai.com/v1"
+    
+    # 价格配置（美元/千token）
+    pricing:
+      input_tokens: 0.15   # GPT-4输入
+      output_tokens: 0.30  # GPT-4输出
+      
+    models:
+      - "gpt-4"
+      - "gpt-4-turbo"
+      - "gpt-3.5-turbo"
+
+  # 百度文心配置
+  qianfan:
+    enabled: true
+    api_key: ""    # 你的API Key
+    secret_key: "" # 你的Secret Key
+    
+    # 价格配置（人民币/千token）
+    pricing:
+      input_tokens: 0.12
+      output_tokens: 0.24
+      
+    models:
+      - "ERNIE-4.0"
+      - "ERNIE-3.5"
+      - "ERNIE-Lite"
+
+# 监控配置
+monitoring:
+  # 预算告警
+  budget_alerts:
+    enabled: true
+    daily_limit: 100.0   # 每日预算（人民币）
+    weekly_limit: 500.0  # 每周预算
+    monthly_limit: 2000.0 # 每月预算
+    
+  # 通知方式
+  notifications:
+    email: ""  # 告警邮箱
+    webhook: "" # Webhook URL
+    
+  # 数据保留
+  data_retention:
+    days: 90  # 保留90天数据
+
+# 界面配置
+ui:
+  theme: "light"  # light/dark
+  language: "zh"  # zh/en
+  refresh_interval: 30  # 刷新间隔（秒）
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG/INFO/WARNING/ERROR
+  file: "logs/aicost.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5

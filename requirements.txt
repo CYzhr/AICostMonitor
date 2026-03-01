@@ -1,0 +1,25 @@
+# AICostMonitor依赖包
+
+# Web框架
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# 模板引擎
+jinja2==3.1.2
+
+# 数据库
+sqlite3
+
+# 配置文件
+pyyaml==6.0.1
+
+# 数据类型
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# 开发工具
+python-dotenv==1.0.0
+
+# 测试
+pytest==7.4.3
+httpx==0.25.1
