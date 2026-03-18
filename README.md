@@ -1,71 +1,61 @@
 # AICostMonitor - AI API成本监控工具
 
-## 概述
-AICostMonitor是一个开源的AI API成本监控工具，帮助开发者实时跟踪和管理多个AI提供商的API使用成本。
+[![在线演示](https://img.shields.io/badge/在线演示-点击访问-green)](http://106.13.110.26/)
+[![GitHub](https://img.shields.io/badge/GitHub-开源项目-blue)](https://github.com/CYzhr/AICostMonitor)
 
-## 功能特性
-- ✅ 实时计算DeepSeek、OpenAI、百度文心等API成本
-- ✅ 多模型成本对比分析
-- ✅ 用量统计和预算提醒
-- ✅ 简单的Web管理界面
-- ✅ 数据导出功能
+**实时监控你的AI API成本，节省20-30%开支！**
 
-## 支持提供商
-- DeepSeek (qianfan/deepseek-v3.2)
-- OpenAI (GPT-4, GPT-3.5)
-- 百度文心系列
-- 通义千问
-- Claude系列 (如果可用)
+## 🚀 在线演示
 
-## 技术栈
-- Python 3.9+
-- FastAPI (Web框架)
-- SQLite (数据库)
-- Jinja2 (模板引擎)
-- Bootstrap 5 (前端样式)
+- 📊 Dashboard: http://106.13.110.26/
+- 📚 API文档: http://106.13.110.26/docs
+- 💻 快速集成: [examples/integration.py](examples/integration.py)
 
-## 快速开始
+## ✨ 功能特性
 
-### 安装
+- ✅ **实时成本计算** - DeepSeek、OpenAI、Claude、百度文心、通义千问等
+- ✅ **多模型对比** - 找出最具性价比的模型
+- ✅ **预算提醒** - 超出预算自动通知
+- ✅ **数据导出** - JSON/CSV格式导出
+- ✅ **简单集成** - 3行代码即可使用
+
+## 📦 快速开始
+
+### 方法1: 使用在线服务（推荐）
+
+```python
+import requests
+
+# 记录API调用
+requests.post("http://106.13.110.26/api/record", data={
+    "provider": "openai",
+    "model": "gpt-4",
+    "input_tokens": 1000,
+    "output_tokens": 500
+})
+
+# 查看成本统计
+# 访问 http://106.13.110.26/dashboard
+```
+
+### 方法2: 自托管
+
 ```bash
 git clone https://github.com/CYzhr/AICostMonitor.git
 cd AICostMonitor
 pip install -r requirements.txt
-```
-
-### 配置
-1. 复制配置文件：
-```bash
-cp config.example.yaml config.yaml
-```
-
-2. 编辑`config.yaml`，添加你的API密钥：
-```yaml
-providers:
-  deepseek:
-    api_key: "your-deepseek-api-key"
-    price_per_1k_input: 0.14  # 人民币/千token
-    price_per_1k_output: 0.28
-  openai:
-    api_key: "your-openai-api-key"
-    price_per_1k_input: 0.15  # 美元/千token
-    price_per_1k_output: 0.30
-```
-
-### 运行
-```bash
 python src/main.py
 ```
 
-访问 http://localhost:8000 查看监控面板。
+## 💰 定价
 
-## 贡献指南
-欢迎贡献代码！请阅读[CONTRIBUTING.md](CONTRIBUTING.md)了解详细指南。
+| 计划 | 价格 | 功能 |
+|------|------|------|
+| 免费版 | ¥0 | 无限API调用记录、基础统计 |
+| 专业版 | ¥99/月 | 高级分析、多项目管理、预算提醒 |
+| 企业版 | ¥499/月 | 团队协作、优先支持、定制开发 |
 
-## 许可证
-MIT License
+## 📞 联系方式
 
-## 联系方式
-- 项目主页：https://github.com/CYzhr/AICostMonitor
-- 问题反馈：GitHub Issues
-- 功能建议：GitHub Discussions
+- PayPal: https://www.paypal.com/paypalme/Cyzhr
+- 问题反馈: GitHub Issues
