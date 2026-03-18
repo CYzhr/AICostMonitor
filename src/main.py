@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 AICostMonitor - AI API成本监控Web应用
-基于FastAPI构建
+基于FastAPI构建，支持USD/CNY双币计费
 """
 
 import os
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Form, Depends
+from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -30,7 +30,6 @@ class DatabaseManager:
     """数据库管理器"""
     
     def __init__(self, db_path: str = "data/aicost.db"):
-        """初始化数据库"""
         self.db_path = db_path
         self.init_database()
     
@@ -41,7 +40,7 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 创建API调用记录表
+        # API调用记录表（支持USD和CNY）
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS api_calls (
             id TEXT PRIMARY KEY,
@@ -49,6 +48,7 @@ class DatabaseManager:
             model TEXT NOT NULL,
             input_tokens INTEGER NOT NULL,
             output_tokens INTEGER NOT NULL,
+            cost_usd REAL NOT NULL,
             cost_cny REAL NOT NULL,
             timestamp DATETIME NOT NULL,
             metadata TEXT,
@@ -56,12 +56,40 @@ class DatabaseManager:
         )
         ''')
         
-        # 创建成本统计表（每日汇总）
+        # 用户配置表
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS daily_summary (
-            date DATE PRIMARY KEY,
-            total_calls INTEGER NOT NULL,
-            total_cost_cny REAL NOT NULL,
+        CREATE TABLE IF NOT EXISTS user_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_key TEXT UNIQUE NOT NULL,
+            config_value TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
+        # 提供商API密钥表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS provider_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT UNIQUE NOT NULL,
+            api_key TEXT,
+            api_secret TEXT,
+            base_url TEXT,
+            enabled INTEGER DEFAULT 1,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
+        # 预算提醒表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS budget_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_type TEXT NOT NULL,
+            threshold_value REAL NOT NULL,
+            threshold_currency TEXT DEFAULT 'USD',
+            notify_email TEXT,
+            notify_webhook TEXT,
+            enabled INTEGER DEFAULT 1,
+            last_triggered DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         ''')
@@ -80,14 +108,15 @@ class DatabaseManager:
         
         cursor.execute('''
         INSERT INTO api_calls 
-        (id, provider, model, input_tokens, output_tokens, cost_cny, timestamp, metadata)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (id, provider, model, input_tokens, output_tokens, cost_usd, cost_cny, timestamp, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             record.id,
             record.provider,
             record.model,
             record.input_tokens,
             record.output_tokens,
+            record.cost_usd,
             record.cost_cny,
             record.timestamp.isoformat(),
             json.dumps(record.metadata, ensure_ascii=False)
@@ -114,96 +143,265 @@ class DatabaseManager:
         return [dict(row) for row in rows]
     
     def get_cost_summary(self, days: int = 30) -> Dict[str, Any]:
-        """获取成本摘要"""
+        """获取成本摘要（支持USD和CNY）"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # 总成本
-        cursor.execute('SELECT SUM(cost_cny) FROM api_calls')
-        total_cost = cursor.fetchone()[0] or 0.0
+        cursor.execute('SELECT SUM(cost_usd), SUM(cost_cny), COUNT(*) FROM api_calls')
+        row = cursor.fetchone()
+        total_cost_usd = row[0] or 0.0
+        total_cost_cny = row[1] or 0.0
+        total_calls = row[2] or 0
         
         # 按提供商统计
         cursor.execute('''
-        SELECT provider, SUM(cost_cny) as cost, COUNT(*) as calls
+        SELECT provider, SUM(cost_usd) as cost_usd, SUM(cost_cny) as cost_cny, COUNT(*) as calls
         FROM api_calls 
         GROUP BY provider
+        ORDER BY cost_usd DESC
         ''')
         by_provider = [
-            {"provider": row[0], "cost": row[1], "calls": row[2]}
+            {
+                "provider": row[0], 
+                "cost_usd": row[1], 
+                "cost_cny": row[2], 
+                "calls": row[3]
+            }
             for row in cursor.fetchall()
         ]
         
-        # 按日期统计（最近N天）
+        # 按模型统计
+        cursor.execute('''
+        SELECT provider, model, SUM(cost_usd) as cost_usd, SUM(cost_cny) as cost_cny, COUNT(*) as calls
+        FROM api_calls 
+        GROUP BY provider, model
+        ORDER BY cost_usd DESC
+        LIMIT 10
+        ''')
+        by_model = [
+            {
+                "provider": row[0],
+                "model": row[1], 
+                "cost_usd": row[2], 
+                "cost_cny": row[3], 
+                "calls": row[4]
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        # 按日期统计
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
         
         cursor.execute('''
         SELECT 
             DATE(timestamp) as date,
-            SUM(cost_cny) as daily_cost,
+            SUM(cost_usd) as daily_cost_usd,
+            SUM(cost_cny) as daily_cost_cny,
             COUNT(*) as daily_calls
         FROM api_calls 
         WHERE timestamp >= ? AND timestamp <= ?
         GROUP BY DATE(timestamp)
-        ORDER BY date DESC
+        ORDER BY date ASC
         ''', (start_date.isoformat(), end_date.isoformat()))
         
         daily_stats = [
-            {"date": row[0], "cost": row[1], "calls": row[2]}
+            {
+                "date": row[0], 
+                "cost_usd": row[1], 
+                "cost_cny": row[2], 
+                "calls": row[3]
+            }
             for row in cursor.fetchall()
         ]
+        
+        # 今日统计
+        today = datetime.now().date()
+        cursor.execute('''
+        SELECT SUM(cost_usd), SUM(cost_cny), COUNT(*)
+        FROM api_calls 
+        WHERE DATE(timestamp) = ?
+        ''', (today.isoformat(),))
+        row = cursor.fetchone()
+        today_stats = {
+            "cost_usd": row[0] or 0.0,
+            "cost_cny": row[1] or 0.0,
+            "calls": row[2] or 0
+        }
+        
+        # 本周统计
+        week_start = today - timedelta(days=today.weekday())
+        cursor.execute('''
+        SELECT SUM(cost_usd), SUM(cost_cny), COUNT(*)
+        FROM api_calls 
+        WHERE DATE(timestamp) >= ?
+        ''', (week_start.isoformat(),))
+        row = cursor.fetchone()
+        week_stats = {
+            "cost_usd": row[0] or 0.0,
+            "cost_cny": row[1] or 0.0,
+            "calls": row[2] or 0
+        }
+        
+        # 本月统计
+        month_start = today.replace(day=1)
+        cursor.execute('''
+        SELECT SUM(cost_usd), SUM(cost_cny), COUNT(*)
+        FROM api_calls 
+        WHERE DATE(timestamp) >= ?
+        ''', (month_start.isoformat(),))
+        row = cursor.fetchone()
+        month_stats = {
+            "cost_usd": row[0] or 0.0,
+            "cost_cny": row[1] or 0.0,
+            "calls": row[2] or 0
+        }
         
         conn.close()
         
         return {
-            "total_cost": total_cost,
-            "total_calls": sum(item["calls"] for item in by_provider),
+            "total_cost_usd": total_cost_usd,
+            "total_cost_cny": total_cost_cny,
+            "total_calls": total_calls,
             "by_provider": by_provider,
-            "daily_stats": daily_stats
+            "by_model": by_model,
+            "daily_stats": daily_stats,
+            "today": today_stats,
+            "week": week_stats,
+            "month": month_stats
         }
+    
+    # 用户配置管理
+    def get_user_config(self, key: str, default: Any = None) -> Any:
+        """获取用户配置"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT config_value FROM user_config WHERE config_key = ?', (key,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            try:
+                return json.loads(row[0])
+            except:
+                return row[0]
+        return default
+    
+    def set_user_config(self, key: str, value: Any):
+        """设置用户配置"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+        INSERT OR REPLACE INTO user_config (config_key, config_value, updated_at)
+        VALUES (?, ?, ?)
+        ''', (key, json.dumps(value), datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    
+    # 提供商API密钥管理
+    def get_provider_keys(self) -> List[Dict]:
+        """获取所有提供商密钥配置"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM provider_keys ORDER BY provider')
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    def get_provider_key(self, provider: str) -> Optional[Dict]:
+        """获取单个提供商密钥配置"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM provider_keys WHERE provider = ?', (provider,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    
+    def set_provider_key(self, provider: str, api_key: str = None, 
+                        api_secret: str = None, base_url: str = None, enabled: bool = True):
+        """设置提供商密钥配置"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+        INSERT OR REPLACE INTO provider_keys 
+        (provider, api_key, api_secret, base_url, enabled, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (provider, api_key, api_secret, base_url, 1 if enabled else 0, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    
+    def delete_provider_key(self, provider: str):
+        """删除提供商密钥配置"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM provider_keys WHERE provider = ?', (provider,))
+        conn.commit()
+        conn.close()
+    
+    # 预算提醒管理
+    def get_budget_alerts(self) -> List[Dict]:
+        """获取所有预算提醒配置"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM budget_alerts ORDER BY alert_type')
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    def set_budget_alert(self, alert_type: str, threshold_value: float, 
+                         threshold_currency: str = 'USD', notify_email: str = None,
+                         notify_webhook: str = None, enabled: bool = True):
+        """设置预算提醒"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+        INSERT OR REPLACE INTO budget_alerts 
+        (alert_type, threshold_value, threshold_currency, notify_email, notify_webhook, enabled)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (alert_type, threshold_value, threshold_currency, notify_email, notify_webhook, 1 if enabled else 0))
+        conn.commit()
+        conn.close()
+    
+    def delete_budget_alert(self, alert_id: int):
+        """删除预算提醒"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM budget_alerts WHERE id = ?', (alert_id,))
+        conn.commit()
+        conn.close()
 
 
 class AICostMonitor:
     """AI成本监控应用"""
     
     def __init__(self, config_path: Optional[str] = None):
-        """初始化应用"""
         self.config_path = config_path or "config.yaml"
         self.config = self.load_config()
         
-        # 初始化组件
         self.calculator = CostCalculator(config_path)
         self.db = DatabaseManager(self.config.get("database", {}).get("path", "data/aicost.db"))
         
-        # FastAPI应用
         self.app = FastAPI(
             title="AICostMonitor",
-            description="AI API成本监控工具",
-            version="1.0.0"
+            description="AI API成本监控工具 - 支持USD/CNY双币计费",
+            version="2.0.0"
         )
         
-        # 设置静态文件和模板
         self.app.mount("/static", StaticFiles(directory="static"), name="static")
         self.templates = Jinja2Templates(directory="templates")
         
-        # 注册路由
         self.setup_routes()
     
     def load_config(self) -> Dict:
-        """加载配置文件"""
         config_path = Path(self.config_path)
         if not config_path.exists():
-            # 使用默认配置
             return {
-                "server": {
-                    "host": "0.0.0.0",
-                    "port": 8000
-                },
-                "database": {
-                    "path": "data/aicost.db"
-                }
+                "server": {"host": "0.0.0.0", "port": 8000},
+                "database": {"path": "data/aicost.db"}
             }
-        
         with open(config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
     
@@ -215,6 +413,9 @@ class AICostMonitor:
             """首页"""
             summary = self.db.get_cost_summary(days=30)
             recent_calls = self.db.get_recent_calls(limit=50)
+            exchange_rate = self.calculator.get_exchange_rate()
+            display_currency = self.db.get_user_config("display_currency", "USD")
+            providers = self.calculator.get_available_providers()
             
             return self.templates.TemplateResponse(
                 "index.html",
@@ -222,15 +423,63 @@ class AICostMonitor:
                     "request": request,
                     "summary": summary,
                     "recent_calls": recent_calls,
-                    "providers": list(self.calculator.pricing_config.keys())
+                    "providers": providers,
+                    "exchange_rate": exchange_rate,
+                    "display_currency": display_currency
                 }
             )
         
+        @self.app.get("/dashboard", response_class=HTMLResponse)
+        async def dashboard(request: Request):
+            """仪表板页面"""
+            summary = self.db.get_cost_summary(days=30)
+            display_currency = self.db.get_user_config("display_currency", "USD")
+            exchange_rate = self.calculator.get_exchange_rate()
+            
+            return self.templates.TemplateResponse(
+                "dashboard.html",
+                {
+                    "request": request,
+                    "summary": summary,
+                    "display_currency": display_currency,
+                    "exchange_rate": exchange_rate
+                }
+            )
+        
+        @self.app.get("/config", response_class=HTMLResponse)
+        async def config_page(request: Request):
+            """配置页面"""
+            display_currency = self.db.get_user_config("display_currency", "USD")
+            provider_keys = self.db.get_provider_keys()
+            budget_alerts = self.db.get_budget_alerts()
+            available_providers = self.calculator.get_available_providers()
+            exchange_rate = self.calculator.get_exchange_rate()
+            
+            return self.templates.TemplateResponse(
+                "config.html",
+                {
+                    "request": request,
+                    "display_currency": display_currency,
+                    "provider_keys": provider_keys,
+                    "budget_alerts": budget_alerts,
+                    "available_providers": available_providers,
+                    "exchange_rate": exchange_rate
+                }
+            )
+        
+        # API端点
         @self.app.get("/api/summary")
         async def get_summary(days: int = 30):
             """获取成本摘要API"""
             summary = self.db.get_cost_summary(days=days)
+            summary["exchange_rate"] = self.calculator.get_exchange_rate()
             return JSONResponse(summary)
+        
+        @self.app.get("/api/daily-stats")
+        async def get_daily_stats(days: int = 30):
+            """获取每日统计API"""
+            summary = self.db.get_cost_summary(days=days)
+            return JSONResponse(summary["daily_stats"])
         
         @self.app.post("/api/record")
         async def record_call(
@@ -242,12 +491,10 @@ class AICostMonitor:
         ):
             """记录API调用"""
             try:
-                # 解析metadata
                 meta_dict = {}
                 if metadata:
                     meta_dict = json.loads(metadata)
                 
-                # 计算成本并记录
                 record = self.calculator.record_call(
                     provider=provider,
                     model=model,
@@ -256,12 +503,12 @@ class AICostMonitor:
                     metadata=meta_dict
                 )
                 
-                # 保存到数据库
                 self.db.save_call_record(record)
                 
                 return JSONResponse({
                     "success": True,
                     "record_id": record.id,
+                    "cost_usd": record.cost_usd,
                     "cost_cny": record.cost_cny,
                     "message": "API调用记录成功"
                 })
@@ -278,44 +525,104 @@ class AICostMonitor:
             calls = self.db.get_recent_calls(limit=limit)
             return JSONResponse(calls)
         
-        @self.app.get("/dashboard")
-        async def dashboard(request: Request):
-            """仪表板页面"""
-            return self.templates.TemplateResponse(
-                "dashboard.html",
-                {"request": request}
-            )
+        @self.app.get("/api/providers")
+        async def get_providers():
+            """获取所有支持的提供商和模型"""
+            providers = self.calculator.get_available_providers()
+            return JSONResponse(providers)
         
-        @self.app.get("/config")
-        async def config_page(request: Request):
-            """配置页面"""
-            return self.templates.TemplateResponse(
-                "config.html",
-                {
-                    "request": request,
-                    "config": self.config,
-                    "pricing_config": self.calculator.pricing_config
-                }
+        @self.app.get("/api/exchange-rate")
+        async def get_exchange_rate():
+            """获取汇率"""
+            rate = self.calculator.get_exchange_rate()
+            return JSONResponse({"usd_to_cny": rate})
+        
+        # 配置API
+        @self.app.post("/api/config/currency")
+        async def set_display_currency(currency: str = Form(...)):
+            """设置显示货币"""
+            if currency not in ["USD", "CNY"]:
+                return JSONResponse({"success": False, "error": "无效的货币类型"}, status_code=400)
+            
+            self.db.set_user_config("display_currency", currency)
+            return JSONResponse({"success": True, "currency": currency})
+        
+        @self.app.post("/api/config/provider-key")
+        async def set_provider_key_api(
+            provider: str = Form(...),
+            api_key: str = Form(None),
+            api_secret: str = Form(None),
+            base_url: str = Form(None),
+            enabled: bool = Form(True)
+        ):
+            """设置提供商API密钥"""
+            self.db.set_provider_key(provider, api_key, api_secret, base_url, enabled)
+            return JSONResponse({"success": True, "message": f"{provider} 配置已保存"})
+        
+        @self.app.delete("/api/config/provider-key/{provider}")
+        async def delete_provider_key_api(provider: str):
+            """删除提供商API密钥"""
+            self.db.delete_provider_key(provider)
+            return JSONResponse({"success": True, "message": f"{provider} 配置已删除"})
+        
+        @self.app.post("/api/config/budget-alert")
+        async def set_budget_alert_api(
+            alert_type: str = Form(...),
+            threshold_value: float = Form(...),
+            threshold_currency: str = Form("USD"),
+            notify_email: str = Form(None),
+            notify_webhook: str = Form(None),
+            enabled: bool = Form(True)
+        ):
+            """设置预算提醒"""
+            self.db.set_budget_alert(
+                alert_type, threshold_value, threshold_currency, 
+                notify_email, notify_webhook, enabled
             )
+            return JSONResponse({"success": True, "message": "预算提醒已保存"})
+        
+        @self.app.delete("/api/config/budget-alert/{alert_id}")
+        async def delete_budget_alert_api(alert_id: int):
+            """删除预算提醒"""
+            self.db.delete_budget_alert(alert_id)
+            return JSONResponse({"success": True, "message": "预算提醒已删除"})
+        
+        @self.app.get("/api/pricing/{provider}")
+        async def get_provider_pricing(provider: str):
+            """获取提供商定价信息"""
+            if provider not in self.calculator.pricing_config:
+                return JSONResponse({"error": "未知的提供商"}, status_code=404)
+            
+            pricing_info = {}
+            for model, pricing in self.calculator.pricing_config[provider].items():
+                pricing_info[model] = {
+                    "input_price_per_1k": pricing.input_price_per_1k,
+                    "output_price_per_1k": pricing.output_price_per_1k,
+                    "currency": pricing.currency.value
+                }
+            
+            return JSONResponse({
+                "provider": provider,
+                "pricing": pricing_info
+            })
         
         @self.app.get("/export")
         async def export_data(format: str = "json"):
             """导出数据"""
             if format == "json":
-                # 导出JSON格式
                 summary = self.db.get_cost_summary(days=365)
-                recent_calls = self.db.get_recent_calls(limit=1000)
+                recent_calls = self.db.get_recent_calls(limit=10000)
                 
                 export_data = {
                     "export_time": datetime.now().isoformat(),
+                    "exchange_rate": self.calculator.get_exchange_rate(),
                     "summary": summary,
                     "recent_calls": recent_calls
                 }
                 
                 return JSONResponse(export_data)
             
-            else:
-                return JSONResponse({"error": "不支持的格式"}, status_code=400)
+            return JSONResponse({"error": "不支持的格式"}, status_code=400)
     
     def run(self):
         """运行应用"""
@@ -324,7 +631,7 @@ class AICostMonitor:
         port = server_config.get("port", 8000)
         debug = server_config.get("debug", False)
         
-        print(f"启动 AICostMonitor...")
+        print(f"启动 AICostMonitor v2.0.0...")
         print(f"访问地址：http://{host}:{port}")
         print(f"API文档：http://{host}:{port}/docs")
         
@@ -336,342 +643,27 @@ class AICostMonitor:
         )
 
 
-# 创建模板文件
-def create_templates():
-    """创建HTML模板"""
-    templates_dir = Path("templates")
-    templates_dir.mkdir(exist_ok=True)
-    
-    # 创建index.html
-    index_html = """
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AICostMonitor - AI API成本监控</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-    <style>
-        .cost-card { transition: transform 0.2s; }
-        .cost-card:hover { transform: translateY(-2px); }
-        .provider-badge { font-size: 0.8rem; }
-        .chart-container { height: 300px; }
-    </style>
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-graph-up"></i> AICostMonitor
-            </a>
-            <div class="navbar-nav">
-                <a class="nav-link" href="/">首页</a>
-                <a class="nav-link" href="/dashboard">仪表板</a>
-                <a class="nav-link" href="/config">配置</a>
-                <a class="nav-link" href="/docs">API文档</a>
-            </div>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        <!-- 概览卡片 -->
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="card cost-card bg-primary text-white">
-                    <div class="card-body">
-                        <h5 class="card-title">总成本</h5>
-                        <h2 class="card-text">¥{{ "%.2f"|format(summary.total_cost) }}</h2>
-                        <p class="card-text">{{ summary.total_calls }} 次调用</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-9">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">成本分布</h5>
-                        <div class="row">
-                            {% for item in summary.by_provider %}
-                            <div class="col-md-3">
-                                <div class="d-flex justify-content-between">
-                                    <span class="badge bg-secondary provider-badge">{{ item.provider }}</span>
-                                    <span>¥{{ "%.2f"|format(item.cost) }}</span>
-                                </div>
-                                <div class="progress mt-1" style="height: 8px;">
-                                    {% set percentage = (item.cost / summary.total_cost * 100) if summary.total_cost > 0 else 0 %}
-                                    <div class="progress-bar" role="progressbar" style="width: {{ percentage }}%"></div>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 记录API调用 -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">记录API调用</h5>
-            </div>
-            <div class="card-body">
-                <form id="recordForm" class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label">提供商</label>
-                        <select class="form-select" id="provider" required>
-                            <option value="">选择提供商</option>
-                            {% for provider in providers %}
-                            <option value="{{ provider }}">{{ provider }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label">模型</label>
-                        <input type="text" class="form-control" id="model" placeholder="如：deepseek-v3.2" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">输入token数</label>
-                        <input type="number" class="form-control" id="input_tokens" min="0" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label">输出token数</label>
-                        <input type="number" class="form-control" id="output_tokens" min="0" required>
-                    </div>
-                    <div class="col-md-2 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary w-100">
-                            <i class="bi bi-save"></i> 记录
-                        </button>
-                    </div>
-                </form>
-                <div id="recordResult" class="mt-2"></div>
-            </div>
-        </div>
-
-        <!-- 最近调用记录 -->
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">最近API调用记录</h5>
-                <a href="/export?format=json" class="btn btn-sm btn-outline-primary">
-                    <i class="bi bi-download"></i> 导出数据
-                </a>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>时间</th>
-                                <th>提供商</th>
-                                <th>模型</th>
-                                <th>输入token</th>
-                                <th>输出token</th>
-                                <th>成本(¥)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for call in recent_calls %}
-                            <tr>
-                                <td>{{ call.timestamp[:19] }}</td>
-                                <td><span class="badge bg-secondary">{{ call.provider }}</span></td>
-                                <td><small>{{ call.model }}</small></td>
-                                <td>{{ call.input_tokens }}</td>
-                                <td>{{ call.output_tokens }}</td>
-                                <td class="fw-bold">{{ "%.4f"|format(call.cost_cny) }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <footer class="mt-5 py-3 bg-light text-center">
-        <div class="container">
-            <p class="mb-0">
-                AICostMonitor v1.0.0 | 
-                <a href="https://github.com/CYzhr/AICostMonitor" class="text-decoration-none">
-                    <i class="bi bi-github"></i> GitHub
-                </a>
-            </p>
-        </div>
-    </footer>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // 提交API调用记录
-        document.getElementById('recordForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const formData = new FormData();
-            formData.append('provider', document.getElementById('provider').value);
-            formData.append('model', document.getElementById('model').value);
-            formData.append('input_tokens', document.getElementById('input_tokens').value);
-            formData.append('output_tokens', document.getElementById('output_tokens').value);
-            
-            const resultDiv = document.getElementById('recordResult');
-            resultDiv.innerHTML = '<div class="alert alert-info">提交中...</div>';
-            
-            try {
-                const response = await fetch('/api/record', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    resultDiv.innerHTML = `
-                        <div class="alert alert-success">
-                            <i class="bi bi-check-circle"></i> 记录成功！
-                            成本：¥${data.cost_cny.toFixed(4)}
-                        </div>
-                    `;
-                    // 清空表单
-                    document.getElementById('recordForm').reset();
-                    // 刷新页面
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    resultDiv.innerHTML = `
-                        <div class="alert alert-danger">
-                            <i class="bi bi-exclamation-triangle"></i> 错误：${data.error}
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                resultDiv.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="bi bi-exclamation-triangle"></i> 网络错误：${error.message}
-                    </div>
-                `;
-            }
-        });
-    </script>
-</body>
-</html>
-    """
-    
-    (templates_dir / "index.html").write_text(index_html, encoding="utf-8")
-    
-    # 创建简单的dashboard.html
-    dashboard_html = """
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>仪表板 - AICostMonitor</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-graph-up"></i> AICostMonitor
-            </a>
-            <a class="nav-link text-light" href="/">返回首页</a>
-        </div>
-    </nav>
-    
-    <div class="container mt-4">
-        <div class="card">
-            <div class="card-header">
-                <h4>仪表板 (开发中)</h4>
-            </div>
-            <div class="card-body">
-                <p>高级仪表板功能正在开发中，将包含：</p>
-                <ul>
-                    <li>实时成本图表</li>
-                    <li>预算预警系统</li>
-                    <li>多维度分析</li>
-                    <li>自动报告生成</li>
-                </ul>
-                <a href="/" class="btn btn-primary">返回首页</a>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-    """
-    
-    (templates_dir / "dashboard.html").write_text(dashboard_html, encoding="utf-8")
-    
-    # 创建简单的config.html
-    config_html = """
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>配置 - AICostMonitor</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-graph-up"></i> AICostMonitor
-            </a>
-            <a class="nav-link text-light" href="/">返回首页</a>
-        </div>
-    </nav>
-    
-    <div class="container mt-4">
-        <div class="card">
-            <div class="card-header">
-                <h4>配置管理</h4>
-            </div>
-            <div class="card-body">
-                <p>配置管理功能正在开发中，将支持：</p>
-                <ul>
-                    <li>在线编辑配置文件</li>
-                    <li>提供商API密钥管理</li>
-                    <li>定价策略配置</li>
-                    <li>通知设置</li>
-                </ul>
-                <div class="alert alert-info">
-                    <strong>当前配置位置：</strong> config.yaml
-                    <br>
-                    请手动编辑配置文件后重启应用。
-                </div>
-                <a href="/" class="btn btn-primary">返回首页</a>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-    """
-    
-    (templates_dir / "config.html").write_text(config_html, encoding="utf-8")
-
-
 def main():
     """主函数"""
     print("=" * 60)
-    print("AICostMonitor - AI API成本监控工具")
+    print("AICostMonitor - AI API成本监控工具 v2.0.0")
+    print("支持 USD/CNY 双币计费")
     print("=" * 60)
     
-    # 创建必要的目录
     os.makedirs("static", exist_ok=True)
     os.makedirs("data", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     
-    # 创建模板文件
-    create_templates()
-    
-    # 检查配置文件
     config_path = "config.yaml"
     if not os.path.exists(config_path):
         print(f"配置文件 {config_path} 不存在，使用默认配置")
-        # 创建默认配置文件
-        with open("config.example.yaml", "r", encoding="utf-8") as f:
-            example_config = f.read()
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(example_config)
-        print(f"已创建默认配置文件：{config_path}")
+        if os.path.exists("config.example.yaml"):
+            with open("config.example.yaml", "r", encoding="utf-8") as f:
+                example_config = f.read()
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write(example_config)
+            print(f"已创建默认配置文件：{config_path}")
     
-    # 启动应用
     app = AICostMonitor(config_path)
     app.run()
 

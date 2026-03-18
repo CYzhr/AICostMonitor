@@ -350,8 +350,19 @@ class PaymentManager:
                     "status": "success",
                     "message": "测试支付成功"
                 }
+            elif provider == PaymentProvider.PAYPAL.value:
+                # PayPal支付 - 返回PayPal.me链接
+                paypal_link = f"https://www.paypal.com/paypalme/Cyzhr/{amount}CNY"
+                success = True
+                payment_result = {
+                    "status": "pending_payment",
+                    "message": "请通过PayPal支付",
+                    "paypal_link": paypal_link,
+                    "amount": amount,
+                    "currency": "CNY"
+                }
             else:
-                # 真实支付处理（待实现）
+                # 其他支付提供商
                 success = False
                 payment_result = {
                     "status": "failed",

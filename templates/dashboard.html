@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表板 - AICostMonitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .stat-card { transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .chart-container { height: 300px; }
+        .currency-switch { cursor: pointer; }
+        .loading { opacity: 0.6; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-graph-up"></i> AICostMonitor
+            </a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="/">首页</a>
+                <a class="nav-link active" href="/dashboard">仪表板</a>
+                <a class="nav-link" href="/config">配置</a>
+                <a class="nav-link" href="/docs">API文档</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- 货币切换 -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4><i class="bi bi-speedometer2"></i> 成本仪表板</h4>
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-primary currency-btn" data-currency="USD">USD $</button>
+                <button type="button" class="btn btn-outline-primary currency-btn" data-currency="CNY">CNY ¥</button>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card stat-card bg-primary text-white">
+                    <div class="card-body">
+                        <h6 class="card-title"><i class="bi bi-calendar-day"></i> 今日</h6>
+                        <h3 class="card-text cost-value" data-usd="{{ summary.today.cost_usd }}" data-cny="{{ summary.today.cost_cny }}">
+                            ${{ "%.4f"|format(summary.today.cost_usd) }}
+                        </h3>
+                        <small>{{ summary.today.calls }} 次调用</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card bg-success text-white">
+                    <div class="card-body">
+                        <h6 class="card-title"><i class="bi bi-calendar-week"></i> 本周</h6>
+                        <h3 class="card-text cost-value" data-usd="{{ summary.week.cost_usd }}" data-cny="{{ summary.week.cost_cny }}">
+                            ${{ "%.4f"|format(summary.week.cost_usd) }}
+                        </h3>
+                        <small>{{ summary.week.calls }} 次调用</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card bg-info text-white">
+                    <div class="card-body">
+                        <h6 class="card-title"><i class="bi bi-calendar-month"></i> 本月</h6>
+                        <h3 class="card-text cost-value" data-usd="{{ summary.month.cost_usd }}" data-cny="{{ summary.month.cost_cny }}">
+                            ${{ "%.4f"|format(summary.month.cost_usd) }}
+                        </h3>
+                        <small>{{ summary.month.calls }} 次调用</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card bg-warning text-dark">
+                    <div class="card-body">
+                        <h6 class="card-title"><i class="bi bi-cash-stack"></i> 总计</h6>
+                        <h3 class="card-text cost-value" data-usd="{{ summary.total_cost_usd }}" data-cny="{{ summary.total_cost_cny }}">
+                            ${{ "%.4f"|format(summary.total_cost_usd) }}
+                        </h3>
+                        <small>{{ summary.total_calls }} 次调用</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图表区域 -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-graph-up-arrow"></i> 成本趋势（最近30天）</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-pie-chart"></i> 提供商分布</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="providerChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 详细统计 -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-building"></i> 按提供商统计</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>提供商</th>
+                                        <th>成本</th>
+                                        <th>调用次数</th>
+                                        <th>占比</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="providerTable">
+                                    {% for item in summary.by_provider %}
+                                    <tr>
+                                        <td><span class="badge bg-secondary">{{ item.provider }}</span></td>
+                                        <td class="cost-cell" data-usd="{{ item.cost_usd }}" data-cny="{{ item.cost_cny }}">
+                                            ${{ "%.4f"|format(item.cost_usd) }}
+                                        </td>
+                                        <td>{{ item.calls }}</td>
+                                        <td>
+                                            {% set pct = (item.cost_usd / summary.total_cost_usd * 100) if summary.total_cost_usd > 0 else 0 %}
+                                            <div class="progress" style="height: 20px;">
+                                                <div class="progress-bar" role="progressbar" style="width: {{ pct }}%">
+                                                    {{ "%.1f"|format(pct) }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-cpu"></i> 按模型统计（Top 10）</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>模型</th>
+                                        <th>成本</th>
+                                        <th>调用次数</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in summary.by_model %}
+                                    <tr>
+                                        <td>
+                                            <small>
+                                                <span class="badge bg-info">{{ item.provider }}</span>
+                                                {{ item.model }}
+                                            </small>
+                                        </td>
+                                        <td class="cost-cell" data-usd="{{ item.cost_usd }}" data-cny="{{ item.cost_cny }}">
+                                            ${{ "%.4f"|format(item.cost_usd) }}
+                                        </td>
+                                        <td>{{ item.calls }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 汇率信息 -->
+        <div class="mt-4 text-muted text-center">
+            <small>
+                <i class="bi bi-info-circle"></i>
+                当前汇率: 1 USD = {{ "%.2f"|format(exchange_rate) }} CNY
+                | 数据更新时间: {{ "now"|datetime("local") }}
+            </small>
+        </div>
+    </div>
+
+    <footer class="mt-5 py-3 bg-light text-center">
+        <div class="container">
+            <p class="mb-0">
+                AICostMonitor v2.0.0 | 
+                <a href="https://github.com/CYzhr/AICostMonitor" class="text-decoration-none">
+                    <i class="bi bi-github"></i> GitHub
+                </a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentCurrency = 'USD';
+        const exchangeRate = {{ exchange_rate }};
+        
+        // 趋势图数据
+        const dailyStats = {{ summary.daily_stats | tojson }};
+        
+        // 货币切换
+        document.querySelectorAll('.currency-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentCurrency = this.dataset.currency;
+                document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('active', 'btn-primary'));
+                document.querySelectorAll('.currency-btn').forEach(b => b.classList.add('btn-outline-primary'));
+                this.classList.remove('btn-outline-primary');
+                this.classList.add('active', 'btn-primary');
+                updateDisplay();
+            });
+        });
+        
+        // 设置初始货币
+        document.querySelector('.currency-btn[data-currency="{{ display_currency }}"]').click();
+        
+        function updateDisplay() {
+            // 更新所有成本显示
+            document.querySelectorAll('.cost-value, .cost-cell').forEach(el => {
+                const usd = parseFloat(el.dataset.usd);
+                const cny = parseFloat(el.dataset.cny);
+                if (currentCurrency === 'USD') {
+                    el.textContent = '$' + usd.toFixed(4);
+                } else {
+                    el.textContent = '¥' + cny.toFixed(4);
+                }
+            });
+            
+            // 更新图表
+            updateCharts();
+        }
+        
+        // 成本趋势图
+        const trendCtx = document.getElementById('trendChart').getContext('2d');
+        let trendChart = new Chart(trendCtx, {
+            type: 'line',
+            data: {
+                labels: dailyStats.map(d => d.date.slice(5)), // 只显示月-日
+                datasets: [{
+                    label: '成本 (USD)',
+                    data: dailyStats.map(d => d.cost_usd),
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return currentCurrency === 'USD' ? '$' + value.toFixed(4) : '¥' + (value * exchangeRate).toFixed(2);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // 提供商分布饼图
+        const providerCtx = document.getElementById('providerChart').getContext('2d');
+        const providerData = {{ summary.by_provider | tojson }};
+        const colors = [
+            'rgb(255, 99, 132)',
+            'rgb(54, 162, 235)',
+            'rgb(255, 205, 86)',
+            'rgb(75, 192, 192)',
+            'rgb(153, 102, 255)',
+            'rgb(255, 159, 64)',
+            'rgb(199, 199, 199)',
+            'rgb(83, 102, 255)'
+        ];
+        
+        let providerChart = new Chart(providerCtx, {
+            type: 'doughnut',
+            data: {
+                labels: providerData.map(p => p.provider),
+                datasets: [{
+                    data: providerData.map(p => currentCurrency === 'USD' ? p.cost_usd : p.cost_cny),
+                    backgroundColor: colors.slice(0, providerData.length),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { font: { size: 10 } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = currentCurrency === 'USD' 
+                                    ? '$' + context.raw.toFixed(4) 
+                                    : '¥' + context.raw.toFixed(2);
+                                return context.label + ': ' + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        function updateCharts() {
+            // 更新趋势图
+            trendChart.data.datasets[0].data = dailyStats.map(d => 
+                currentCurrency === 'USD' ? d.cost_usd : d.cost_cny
+            );
+            trendChart.data.datasets[0].label = '成本 (' + currentCurrency + ')';
+            trendChart.update();
+            
+            // 更新饼图
+            providerChart.data.datasets[0].data = providerData.map(p => 
+                currentCurrency === 'USD' ? p.cost_usd : p.cost_cny
+            );
+            providerChart.update();
+        }
+        
+        // 自动刷新数据
+        setInterval(async () => {
+            try {
+                const response = await fetch('/api/summary?days=30');
+                const data = await response.json();
+                // 更新统计卡片
+                document.querySelector('.stat-card.bg-primary .cost-value').dataset.usd = data.today.cost_usd;
+                document.querySelector('.stat-card.bg-primary .cost-value').dataset.cny = data.today.cost_cny;
+                document.querySelector('.stat-card.bg-success .cost-value').dataset.usd = data.week.cost_usd;
+                document.querySelector('.stat-card.bg-success .cost-value').dataset.cny = data.week.cost_cny;
+                document.querySelector('.stat-card.bg-info .cost-value').dataset.usd = data.month.cost_usd;
+                document.querySelector('.stat-card.bg-info .cost-value').dataset.cny = data.month.cost_cny;
+                document.querySelector('.stat-card.bg-warning .cost-value').dataset.usd = data.total_cost_usd;
+                document.querySelector('.stat-card.bg-warning .cost-value').dataset.cny = data.total_cost_cny;
+                updateDisplay();
+            } catch (e) {
+                console.error('刷新数据失败:', e);
+            }
+        }, 60000); // 每分钟刷新
+    </script>
+</body>
+</html>
