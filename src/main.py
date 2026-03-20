@@ -99,6 +99,54 @@ class DatabaseManager:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_calls_timestamp ON api_calls(timestamp)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_calls_provider ON api_calls(provider)')
         
+        # API密钥表（用于SDK认证）
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            name TEXT,
+            key_hash TEXT UNIQUE,
+            prefix TEXT,
+            permissions TEXT,
+            rate_limit INTEGER DEFAULT 1000,
+            daily_limit REAL DEFAULT 100.0,
+            monthly_limit REAL DEFAULT 1000.0,
+            used_today REAL DEFAULT 0.0,
+            used_month REAL DEFAULT 0.0,
+            last_reset_date TEXT,
+            last_reset_month TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            last_used DATETIME,
+            enabled INTEGER DEFAULT 1
+        )
+        ''')
+        
+        # 试用期表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS trials (
+            id TEXT PRIMARY KEY,
+            email TEXT,
+            api_key_id TEXT,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            used_days INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            converted INTEGER DEFAULT 0
+        )
+        ''')
+        
+        # 用户表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE,
+            name TEXT,
+            plan TEXT DEFAULT 'free',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -520,11 +568,124 @@ class AICostMonitor:
                     "error": str(e)
                 }, status_code=400)
         
+        @self.app.post("/api/batch-record")
+        async def batch_record_calls(request: Request):
+            """批量记录API调用 - SDK使用"""
+            try:
+                body = await request.json()
+                records = body.get("records", [])
+                api_key = body.get("api_key", "")
+                
+                if not records:
+                    return JSONResponse({"success": False, "error": "No records provided"}, status_code=400)
+                
+                saved_count = 0
+                total_cost_usd = 0.0
+                total_cost_cny = 0.0
+                
+                for record in records:
+                    try:
+                        # Create APICallRecord from the record data
+                        call_record = APICallRecord(
+                            id=record.get("id", f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{record.get('provider', 'unknown')}"),
+                            provider=record.get("provider", "unknown"),
+                            model=record.get("model", "unknown"),
+                            input_tokens=record.get("input_tokens", 0),
+                            output_tokens=record.get("output_tokens", 0),
+                            timestamp=datetime.fromisoformat(record.get("timestamp", datetime.now().isoformat())),
+                            cost_usd=record.get("cost_usd", 0),
+                            cost_cny=record.get("cost_cny", 0),
+                            metadata=record.get("metadata", {})
+                        )
+                        
+                        self.db.save_call_record(call_record)
+                        saved_count += 1
+                        total_cost_usd += call_record.cost_usd
+                        total_cost_cny += call_record.cost_cny
+                        
+                    except Exception as e:
+                        print(f"Error saving record: {e}")
+                        continue
+                
+                # Check budget alerts after batch
+                self._check_budget_alerts(total_cost_usd, total_cost_cny)
+                
+                return JSONResponse({
+                    "success": True,
+                    "saved_count": saved_count,
+                    "total_cost_usd": round(total_cost_usd, 6),
+                    "total_cost_cny": round(total_cost_cny, 4)
+                })
+                
+            except Exception as e:
+                return JSONResponse({
+                    "success": False,
+                    "error": str(e)
+                }, status_code=400)
+        
         @self.app.get("/api/recent-calls")
         async def get_recent_calls(limit: int = 100):
             """获取最近的API调用"""
             calls = self.db.get_recent_calls(limit=limit)
             return JSONResponse(calls)
+        
+        def _check_budget_alerts(self, additional_cost_usd: float, additional_cost_cny: float):
+            """检查预算提醒"""
+            try:
+                alerts = self.db.get_budget_alerts()
+                summary = self.db.get_cost_summary(days=30)
+                
+                for alert in alerts:
+                    if not alert.get("enabled", 1):
+                        continue
+                    
+                    threshold = alert.get("threshold_value", 0)
+                    currency = alert.get("threshold_currency", "USD")
+                    webhook_url = alert.get("notify_webhook", "")
+                    
+                    current_cost = summary.get("month", {}).get("cost_usd" if currency == "USD" else "cost_cny", 0)
+                    
+                    # Check if exceeded threshold
+                    if current_cost >= threshold * 0.8:  # Alert at 80%
+                        self._send_budget_alert(alert, current_cost, threshold, currency, webhook_url)
+                        
+            except Exception as e:
+                print(f"Error checking budget alerts: {e}")
+        
+        def _send_budget_alert(self, alert: Dict, current_cost: float, threshold: float, currency: str, webhook_url: str):
+            """发送预算提醒"""
+            if not webhook_url:
+                return
+            
+            try:
+                import requests
+                percentage = (current_cost / threshold) * 100 if threshold > 0 else 0
+                
+                payload = {
+                    "event": "budget_alert",
+                    "type": "warning" if current_cost < threshold else "exceeded",
+                    "current_cost": round(current_cost, 4),
+                    "threshold": threshold,
+                    "currency": currency,
+                    "percentage": round(percentage, 1),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": f"预算警告: 已使用 {percentage:.1f}% ({current_cost:.2f} {currency} / {threshold:.2f} {currency})"
+                }
+                
+                requests.post(webhook_url, json=payload, timeout=5)
+                
+                # Update last_triggered
+                conn = sqlite3.connect(self.db.db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE budget_alerts SET last_triggered = ? WHERE id = ?",
+                    (datetime.now().isoformat(), alert.get("id"))
+                )
+                conn.commit()
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error sending budget alert: {e}")
         
         @self.app.get("/api/providers")
         async def get_providers():
@@ -765,9 +926,12 @@ class AICostMonitor:
             conn = sqlite3.connect(self.db.db_path)
             cursor = conn.cursor()
             
-            cursor.execute('''
-            ALTER TABLE payment_notifications ADD COLUMN notified INTEGER DEFAULT 0
-            ''')
+            try:
+                cursor.execute('''
+                ALTER TABLE payment_notifications ADD COLUMN notified INTEGER DEFAULT 0
+                ''')
+            except:
+                pass
             
             cursor.execute('''
             UPDATE payment_notifications SET notified = 1 WHERE id = ?
@@ -777,6 +941,412 @@ class AICostMonitor:
             conn.close()
             
             return JSONResponse({"success": True})
+        
+        # 用户注册和试用期
+        @self.app.post("/api/user/register")
+        async def register_user(
+            email: str = Form(...),
+            user_id: str = Form(None)
+        ):
+            """注册用户，自动开始3天试用期"""
+            from datetime import datetime, timedelta
+            
+            if not user_id:
+                user_id = f"user_{uuid.uuid4().hex[:12]}"
+            
+            trial_ends = datetime.now() + timedelta(days=3)
+            
+            conn = sqlite3.connect(self.db.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            INSERT OR REPLACE INTO users 
+            (user_id, email, trial_ends_at, subscription_status, subscription_plan)
+            VALUES (?, ?, ?, 'trial', 'pro')
+            ''', (user_id, email, trial_ends.isoformat()))
+            
+            conn.commit()
+            conn.close()
+            
+            return JSONResponse({
+                "success": True,
+                "user_id": user_id,
+                "trial_ends_at": trial_ends.isoformat(),
+                "message": "3天试用期已开始"
+            })
+        
+        @self.app.get("/api/user/{user_id}/subscription")
+        async def get_user_subscription(user_id: str):
+            """获取用户订阅状态"""
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if not row:
+                return JSONResponse({"error": "用户不存在"}, status_code=404)
+            
+            user = dict(row)
+            
+            # 检查试用期是否过期
+            if user.get('trial_ends_at'):
+                from datetime import datetime
+                trial_ends = datetime.fromisoformat(user['trial_ends_at'])
+                if datetime.now() > trial_ends and user['subscription_status'] == 'trial':
+                    user['subscription_status'] = 'expired'
+            
+            return JSONResponse(user)
+        
+        # 预算提醒检查
+        @self.app.post("/api/budget/check")
+        async def check_budget_alerts():
+            """检查预算提醒（内部调用）"""
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 获取所有启用的预算提醒
+            cursor.execute('''
+            SELECT * FROM budget_alerts WHERE enabled = 1
+            ''')
+            alerts = cursor.fetchall()
+            
+            # 获取当前成本
+            summary = self.db.get_cost_summary(days=30)
+            current_cost_usd = summary['month']['cost_usd']
+            current_cost_cny = summary['month']['cost_cny']
+            
+            triggered = []
+            for alert in alerts:
+                alert = dict(alert)
+                threshold = alert['threshold_value']
+                currency = alert.get('threshold_currency', 'USD')
+                
+                current_cost = current_cost_usd if currency == 'USD' else current_cost_cny
+                
+                if current_cost >= threshold:
+                    triggered.append({
+                        "alert_id": alert['id'],
+                        "alert_type": alert['alert_type'],
+                        "threshold": threshold,
+                        "current_cost": current_cost,
+                        "currency": currency,
+                        "notify_email": alert.get('notify_email'),
+                        "notify_webhook": alert.get('notify_webhook')
+                    })
+                    
+                    # 记录触发时间
+                    cursor.execute('''
+                    UPDATE budget_alerts SET last_triggered = ? WHERE id = ?
+                    ''', (datetime.now().isoformat(), alert['id']))
+            
+            conn.commit()
+            conn.close()
+            
+            return JSONResponse({
+                "triggered_count": len(triggered),
+                "alerts": triggered
+            })
+        
+        # ========== 试用期系统 ==========
+        
+        @self.app.post("/api/trial/start")
+        async def start_trial(request: Request):
+            """开始3天免费试用"""
+            try:
+                body = await request.json()
+                email = body.get("email", "")
+                name = body.get("name", "")
+                
+                # 检查邮箱是否已经试用过
+                conn = sqlite3.connect(self.db.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT * FROM trials WHERE email = ?", (email,))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    conn.close()
+                    return JSONResponse({
+                        "success": False,
+                        "error": "该邮箱已经使用过试用期"
+                    })
+                
+                # 创建试用期记录
+                trial_id = f"trial_{uuid.uuid4().hex[:12]}"
+                api_key_id = f"ak_{uuid.uuid4().hex[:16]}"
+                api_key = f"aicm_{uuid.uuid4().hex[:32]}"
+                
+                # 保存API密钥
+                cursor.execute('''
+                INSERT INTO api_keys 
+                (id, name, key_hash, prefix, permissions, rate_limit, daily_limit, monthly_limit, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    api_key_id,
+                    f"Trial Key for {email}",
+                    api_key,  # 实际应存储hash
+                    api_key[:10] + "...",
+                    json.dumps({"trial": True}),
+                    1000,  # rate limit
+                    10.0,  # $10/day during trial
+                    50.0,  # $50/month during trial
+                    datetime.now().isoformat(),
+                    (datetime.now() + timedelta(days=3)).isoformat()
+                ))
+                
+                # 保存试用期记录
+                cursor.execute('''
+                INSERT INTO trials 
+                (id, email, api_key_id, expires_at, status)
+                VALUES (?, ?, ?, ?, 'active')
+                ''', (
+                    trial_id,
+                    email,
+                    api_key_id,
+                    (datetime.now() + timedelta(days=3)).isoformat()
+                ))
+                
+                # 保存用户
+                user_id = f"user_{uuid.uuid4().hex[:12]}"
+                cursor.execute('''
+                INSERT OR REPLACE INTO users 
+                (id, email, name, plan, created_at)
+                VALUES (?, ?, ?, 'trial', ?)
+                ''', (user_id, email, name, datetime.now().isoformat()))
+                
+                conn.commit()
+                conn.close()
+                
+                return JSONResponse({
+                    "success": True,
+                    "api_key": api_key,
+                    "trial_id": trial_id,
+                    "user_id": user_id,
+                    "expires_at": (datetime.now() + timedelta(days=3)).isoformat(),
+                    "message": "3天免费试用已开始！",
+                    "quick_start": {
+                        "python": f'import aicostmonitor\naicostmonitor.init(api_key="{api_key}")',
+                        "env": f'export AICOSTMONITOR_API_KEY={api_key}'
+                    }
+                })
+                
+            except Exception as e:
+                return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+        
+        @self.app.get("/api/trial/{trial_id}/status")
+        async def get_trial_status(trial_id: str):
+            """获取试用期状态"""
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM trials WHERE id = ?", (trial_id,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if not row:
+                return JSONResponse({"error": "Trial not found"}, status_code=404)
+            
+            trial = dict(row)
+            expires_at = datetime.fromisoformat(trial['expires_at'])
+            remaining_seconds = max(0, (expires_at - datetime.now()).total_seconds())
+            
+            return JSONResponse({
+                "trial_id": trial_id,
+                "status": trial['status'],
+                "started_at": trial['started_at'],
+                "expires_at": trial['expires_at'],
+                "remaining_days": remaining_seconds / 86400,
+                "remaining_hours": remaining_seconds / 3600,
+                "converted": trial['converted'] == 1
+            })
+        
+        @self.app.post("/api/trial/{trial_id}/convert")
+        async def convert_trial(trial_id: str, request: Request):
+            """将试用期转换为付费订阅"""
+            try:
+                body = await request.json()
+                plan = body.get("plan", "pro")
+                
+                conn = sqlite3.connect(self.db.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                UPDATE trials SET status = 'converted', converted = 1 WHERE id = ?
+                ''', (trial_id,))
+                
+                cursor.execute('''
+                UPDATE api_keys SET expires_at = NULL WHERE id = (
+                    SELECT api_key_id FROM trials WHERE id = ?
+                )
+                ''', (trial_id,))
+                
+                conn.commit()
+                conn.close()
+                
+                return JSONResponse({
+                    "success": True,
+                    "message": f"已转换为{plan}计划"
+                })
+                
+            except Exception as e:
+                return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+        
+        # ========== API密钥管理 ==========
+        
+        @self.app.post("/api/keys/create")
+        async def create_api_key(request: Request):
+            """创建API密钥"""
+            try:
+                body = await request.json()
+                name = body.get("name", "Default Key")
+                daily_limit = body.get("daily_limit", 100.0)
+                monthly_limit = body.get("monthly_limit", 1000.0)
+                
+                api_key_id = f"ak_{uuid.uuid4().hex[:16]}"
+                api_key = f"aicm_{uuid.uuid4().hex[:32]}"
+                
+                conn = sqlite3.connect(self.db.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                INSERT INTO api_keys 
+                (id, name, key_hash, prefix, daily_limit, monthly_limit, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    api_key_id,
+                    name,
+                    api_key,
+                    api_key[:10] + "...",
+                    daily_limit,
+                    monthly_limit,
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                conn.close()
+                
+                return JSONResponse({
+                    "success": True,
+                    "api_key": api_key,
+                    "key_id": api_key_id,
+                    "name": name,
+                    "daily_limit": daily_limit,
+                    "monthly_limit": monthly_limit,
+                    "message": "API密钥创建成功"
+                })
+                
+            except Exception as e:
+                return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+        
+        @self.app.get("/api/keys")
+        async def list_api_keys():
+            """列出所有API密钥"""
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT id, name, prefix, rate_limit, daily_limit, monthly_limit, 
+                       used_today, used_month, created_at, expires_at, enabled
+                FROM api_keys
+                ORDER BY created_at DESC
+            ''')
+            
+            keys = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            
+            return JSONResponse({"keys": keys})
+        
+        @self.app.delete("/api/keys/{key_id}")
+        async def revoke_api_key(key_id: str):
+            """撤销API密钥"""
+            conn = sqlite3.connect(self.db.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("UPDATE api_keys SET enabled = 0 WHERE id = ?", (key_id,))
+            conn.commit()
+            conn.close()
+            
+            return JSONResponse({"success": True, "message": "API密钥已撤销"})
+        
+        @self.app.get("/api/keys/{key_id}/usage")
+        async def get_key_usage(key_id: str):
+            """获取API密钥使用情况"""
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM api_keys WHERE id = ?", (key_id,))
+            key = cursor.fetchone()
+            
+            if not key:
+                conn.close()
+                return JSONResponse({"error": "Key not found"}, status_code=404)
+            
+            key_dict = dict(key)
+            conn.close()
+            
+            return JSONResponse({
+                "key_id": key_id,
+                "name": key_dict.get("name"),
+                "used_today": key_dict.get("used_today", 0),
+                "used_month": key_dict.get("used_month", 0),
+                "daily_limit": key_dict.get("daily_limit", 100),
+                "monthly_limit": key_dict.get("monthly_limit", 1000),
+                "remaining_today": key_dict.get("daily_limit", 100) - key_dict.get("used_today", 0),
+                "remaining_month": key_dict.get("monthly_limit", 1000) - key_dict.get("used_month", 0)
+            })
+        
+        # 模型成本对比
+        @self.app.get("/api/compare")
+        async def compare_models(
+            input_tokens: int = 1000,
+            output_tokens: int = 500
+        ):
+            """对比不同模型的成本"""
+            providers = self.calculator.get_available_providers()
+            
+            comparisons = []
+            for provider, models in providers.items():
+                for model in models:
+                    try:
+                        result = self.calculator.calculate_cost(
+                            provider, model, input_tokens, output_tokens
+                        )
+                        # calculate_cost返回dict，key是'usd'或'cny'
+                        if isinstance(result, dict):
+                            cost = result.get('usd', 0)
+                        else:
+                            cost = result
+                        
+                        if cost and cost > 0:
+                            comparisons.append({
+                                "provider": provider,
+                                "model": model,
+                                "cost_usd": cost,
+                                "cost_cny": result.get('cny', cost * self.calculator.get_exchange_rate()) if isinstance(result, dict) else cost * self.calculator.get_exchange_rate()
+                            })
+                    except Exception:
+                        continue
+        
+        # 按成本排序
+            comparisons.sort(key=lambda x: x['cost_usd'])
+            
+            # 推荐最便宜的3个
+            recommendations = comparisons[:3]
+            
+            return JSONResponse({
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "comparisons": comparisons[:20],  # 返回前20个
+                "recommendations": recommendations,
+                "cheapest": comparisons[0] if comparisons else None
+            })
     
     def run(self):
         """运行应用"""
