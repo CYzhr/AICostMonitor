@@ -353,4 +353,23 @@ def auto_track():
     return enabled
 
 
-__all__ = ['track', 'monitor', 'init', 'auto_track', 'cost', 'AICostMonitor']
+# 导入统一API模块
+from .unified_api import (
+    LoadBalancer,
+    CacheManager,
+    FailoverManager,
+    UnifiedClient
+)
+
+__all__ = [
+    'track', 
+    'monitor', 
+    'init', 
+    'auto_track', 
+    'cost', 
+    'AICostMonitor',
+    'LoadBalancer',
+    'CacheManager',
+    'FailoverManager',
+    'UnifiedClient'
+]

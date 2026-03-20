@@ -16,7 +16,8 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -146,6 +147,24 @@ class DatabaseManager:
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         ''')
+        
+        # 检查users表是否需要迁移
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'id' not in columns:
+            # 需要重建表
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users_new (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE,
+                name TEXT,
+                plan TEXT DEFAULT 'free',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+            cursor.execute("DROP TABLE users")
+            cursor.execute("ALTER TABLE users_new RENAME TO users")
         
         conn.commit()
         conn.close()
@@ -516,7 +535,22 @@ class AICostMonitor:
                 }
             )
         
+        @self.app.get("/robots.txt")
+        async def robots(request: Request):
+            """robots.txt"""
+            return Response("User-agent: *\nAllow: /\nSitemap: http://106.13.110.26/sitemap.xml", media_type="text/plain")
+        
+        @self.app.get("/sitemap.xml")
+        async def sitemap(request: Request):
+            """网站地图"""
+            import os
+            sitemap_path = os.path.join(os.path.dirname(__file__), "..", "templates", "sitemap.xml")
+            with open(sitemap_path) as f:
+                content = f.read()
+            return Response(content, media_type="application/xml")
+        
         # API端点
+        
         @self.app.get("/api/summary")
         async def get_summary(days: int = 30):
             """获取成本摘要API"""
@@ -608,7 +642,7 @@ class AICostMonitor:
                         continue
                 
                 # Check budget alerts after batch
-                self._check_budget_alerts(total_cost_usd, total_cost_cny)
+                AICostMonitor._check_budget_alerts(self, total_cost_usd, total_cost_cny)
                 
                 return JSONResponse({
                     "success": True,
@@ -628,64 +662,6 @@ class AICostMonitor:
             """获取最近的API调用"""
             calls = self.db.get_recent_calls(limit=limit)
             return JSONResponse(calls)
-        
-        def _check_budget_alerts(self, additional_cost_usd: float, additional_cost_cny: float):
-            """检查预算提醒"""
-            try:
-                alerts = self.db.get_budget_alerts()
-                summary = self.db.get_cost_summary(days=30)
-                
-                for alert in alerts:
-                    if not alert.get("enabled", 1):
-                        continue
-                    
-                    threshold = alert.get("threshold_value", 0)
-                    currency = alert.get("threshold_currency", "USD")
-                    webhook_url = alert.get("notify_webhook", "")
-                    
-                    current_cost = summary.get("month", {}).get("cost_usd" if currency == "USD" else "cost_cny", 0)
-                    
-                    # Check if exceeded threshold
-                    if current_cost >= threshold * 0.8:  # Alert at 80%
-                        self._send_budget_alert(alert, current_cost, threshold, currency, webhook_url)
-                        
-            except Exception as e:
-                print(f"Error checking budget alerts: {e}")
-        
-        def _send_budget_alert(self, alert: Dict, current_cost: float, threshold: float, currency: str, webhook_url: str):
-            """发送预算提醒"""
-            if not webhook_url:
-                return
-            
-            try:
-                import requests
-                percentage = (current_cost / threshold) * 100 if threshold > 0 else 0
-                
-                payload = {
-                    "event": "budget_alert",
-                    "type": "warning" if current_cost < threshold else "exceeded",
-                    "current_cost": round(current_cost, 4),
-                    "threshold": threshold,
-                    "currency": currency,
-                    "percentage": round(percentage, 1),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": f"预算警告: 已使用 {percentage:.1f}% ({current_cost:.2f} {currency} / {threshold:.2f} {currency})"
-                }
-                
-                requests.post(webhook_url, json=payload, timeout=5)
-                
-                # Update last_triggered
-                conn = sqlite3.connect(self.db.db_path)
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE budget_alerts SET last_triggered = ? WHERE id = ?",
-                    (datetime.now().isoformat(), alert.get("id"))
-                )
-                conn.commit()
-                conn.close()
-                
-            except Exception as e:
-                print(f"Error sending budget alert: {e}")
         
         @self.app.get("/api/providers")
         async def get_providers():
@@ -1347,6 +1323,64 @@ class AICostMonitor:
                 "recommendations": recommendations,
                 "cheapest": comparisons[0] if comparisons else None
             })
+    
+    def _check_budget_alerts(self, additional_cost_usd: float = 0, additional_cost_cny: float = 0):
+        """检查预算提醒"""
+        try:
+            alerts = self.db.get_budget_alerts()
+            summary = self.db.get_cost_summary(days=30)
+            
+            for alert in alerts:
+                if not alert.get("enabled", 1):
+                    continue
+                
+                threshold = alert.get("threshold_value", 0)
+                currency = alert.get("threshold_currency", "USD")
+                webhook_url = alert.get("notify_webhook", "")
+                
+                current_cost = summary.get("month", {}).get("cost_usd" if currency == "USD" else "cost_cny", 0)
+                
+                # Check if exceeded threshold
+                if current_cost >= threshold * 0.8:  # Alert at 80%
+                    self._send_budget_alert(alert, current_cost, threshold, currency, webhook_url)
+                    
+        except Exception as e:
+            print(f"Error checking budget alerts: {e}")
+    
+    def _send_budget_alert(self, alert: Dict, current_cost: float, threshold: float, currency: str, webhook_url: str):
+        """发送预算提醒"""
+        if not webhook_url:
+            return
+        
+        try:
+            import requests
+            percentage = (current_cost / threshold) * 100 if threshold > 0 else 0
+            
+            payload = {
+                "event": "budget_alert",
+                "type": "warning" if current_cost < threshold else "exceeded",
+                "current_cost": round(current_cost, 4),
+                "threshold": threshold,
+                "currency": currency,
+                "percentage": round(percentage, 1),
+                "timestamp": datetime.now().isoformat(),
+                "message": f"预算警告: 已使用 {percentage:.1f}% ({current_cost:.2f} {currency} / {threshold:.2f} {currency})"
+            }
+            
+            requests.post(webhook_url, json=payload, timeout=5)
+            
+            # Update last_triggered
+            conn = sqlite3.connect(self.db.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE budget_alerts SET last_triggered = ? WHERE id = ?",
+                (datetime.now().isoformat(), alert.get("id"))
+            )
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"Error sending budget alert: {e}")
     
     def run(self):
         """运行应用"""

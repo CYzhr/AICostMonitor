@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="aicostmonitor",
-    version="1.0.0",
+    version="2.0.0",
     description="Track AI API costs automatically - OpenAI, Anthropic, Google, and more",
     author="AICostMonitor",
     author_email="support@aicostmonitor.com",
