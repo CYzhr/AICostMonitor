@@ -201,9 +201,10 @@
             <small>
                 <i class="bi bi-info-circle"></i>
                 当前汇率: 1 USD = {{ "%.2f"|format(exchange_rate) }} CNY
-                | 数据更新时间: {{ "now"|datetime("local") }}
+                | 数据更新时间: <span id="updateTime"></span>
             </small>
         </div>
+        <script>document.getElementById('updateTime').textContent = new Date().toLocaleString('zh-CN');</script>
     </div>
 
     <footer class="mt-5 py-3 bg-light text-center">

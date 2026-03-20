@@ -10,6 +10,7 @@ import sys
 import yaml
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -623,6 +624,159 @@ class AICostMonitor:
                 return JSONResponse(export_data)
             
             return JSONResponse({"error": "不支持的格式"}, status_code=400)
+        
+        # 支付相关API
+        @self.app.post("/api/payment/create-order")
+        async def create_payment_order(
+            user_id: str = Form(...),
+            amount: float = Form(...),
+            currency: str = Form("USD"),
+            description: str = Form(""),
+            provider: str = Form("paypal")
+        ):
+            """创建支付订单"""
+            order_id = f"PAY-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            
+            conn = sqlite3.connect(self.db.db_path)
+            cursor = conn.cursor()
+            
+            # 确保支付订单表存在
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS payment_orders (
+                order_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                amount REAL NOT NULL,
+                currency TEXT DEFAULT 'USD',
+                description TEXT,
+                provider TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                paid_at TEXT,
+                payment_data TEXT
+            )
+            ''')
+            
+            cursor.execute('''
+            INSERT INTO payment_orders 
+            (order_id, user_id, amount, currency, description, provider, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (order_id, user_id, amount, currency, description, provider, 'pending', datetime.now().isoformat()))
+            
+            conn.commit()
+            conn.close()
+            
+            # 返回PayPal支付链接
+            paypal_link = f"https://www.paypal.com/paypalme/Cyzhr/{amount}{currency}"
+            
+            return JSONResponse({
+                "success": True,
+                "order_id": order_id,
+                "paypal_link": paypal_link,
+                "amount": amount,
+                "currency": currency
+            })
+        
+        @self.app.post("/api/payment/paypal-webhook")
+        async def paypal_webhook(request: Request):
+            """PayPal支付回调"""
+            try:
+                body = await request.json()
+                
+                # 记录支付事件
+                order_id = body.get("resource", {}).get("invoice_id", "unknown")
+                amount = body.get("resource", {}).get("amount", {}).get("value", 0)
+                currency = body.get("resource", {}).get("amount", {}).get("currency_code", "USD")
+                
+                conn = sqlite3.connect(self.db.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS payment_orders (
+                    order_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    currency TEXT DEFAULT 'USD',
+                    description TEXT,
+                    provider TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    paid_at TEXT,
+                    payment_data TEXT
+                )
+                ''')
+                
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS payment_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id TEXT,
+                    amount REAL,
+                    currency TEXT,
+                    status TEXT DEFAULT 'paid',
+                    webhook_data TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                ''')
+                
+                # 记录支付通知
+                cursor.execute('''
+                INSERT INTO payment_notifications 
+                (order_id, amount, currency, status, webhook_data)
+                VALUES (?, ?, ?, ?, ?)
+                ''', (order_id, amount, currency, 'paid', json.dumps(body, ensure_ascii=False)))
+                
+                # 更新订单状态
+                cursor.execute('''
+                UPDATE payment_orders SET status = 'paid', paid_at = ? 
+                WHERE order_id = ?
+                ''', (datetime.now().isoformat(), order_id))
+                
+                conn.commit()
+                conn.close()
+                
+                return JSONResponse({"status": "ok"})
+                
+            except Exception as e:
+                return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
+        
+        @self.app.get("/api/payment/pending-notifications")
+        async def get_pending_payment_notifications():
+            """获取待通知的支付记录"""
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT * FROM payment_notifications 
+            WHERE notified IS NULL OR notified = 0
+            ORDER BY created_at DESC
+            ''')
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return JSONResponse({
+                "count": len(rows),
+                "payments": [dict(row) for row in rows]
+            })
+        
+        @self.app.post("/api/payment/mark-notified")
+        async def mark_payment_notified(notification_id: int = Form(...)):
+            """标记支付已通知"""
+            conn = sqlite3.connect(self.db.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            ALTER TABLE payment_notifications ADD COLUMN notified INTEGER DEFAULT 0
+            ''')
+            
+            cursor.execute('''
+            UPDATE payment_notifications SET notified = 1 WHERE id = ?
+            ''', (notification_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            return JSONResponse({"success": True})
     
     def run(self):
         """运行应用"""
@@ -639,7 +793,7 @@ class AICostMonitor:
             self.app,
             host=host,
             port=port,
-            log_level="info" if debug else "warning"
+            log_level="debug" if debug else "info"
         )
 
 

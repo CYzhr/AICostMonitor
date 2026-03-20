@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -6,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>配置 - AICostMonitor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        .config-section { border-left: 3px solid #0d6efd; padding-left: 15px; margin-bottom: 20px; }
+        .api-key-input { font-family: monospace; }
+        .toggle-visibility { cursor: pointer; }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -13,32 +18,566 @@
             <a class="navbar-brand" href="/">
                 <i class="bi bi-graph-up"></i> AICostMonitor
             </a>
-            <a class="nav-link text-light" href="/">返回首页</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="/">首页</a>
+                <a class="nav-link" href="/dashboard">仪表板</a>
+                <a class="nav-link active" href="/config">配置</a>
+                <a class="nav-link" href="/docs">API文档</a>
+            </div>
         </div>
     </nav>
-    
+
     <div class="container mt-4">
-        <div class="card">
+        <h4><i class="bi bi-gear"></i> 系统配置</h4>
+        <hr>
+
+        <!-- 显示货币设置 -->
+        <div class="card mb-4">
             <div class="card-header">
-                <h4>配置管理</h4>
+                <h5 class="mb-0"><i class="bi bi-currency-exchange"></i> 显示货币</h5>
             </div>
             <div class="card-body">
-                <p>配置管理功能正在开发中，将支持：</p>
-                <ul>
-                    <li>在线编辑配置文件</li>
-                    <li>提供商API密钥管理</li>
-                    <li>定价策略配置</li>
-                    <li>通知设置</li>
-                </ul>
-                <div class="alert alert-info">
-                    <strong>当前配置位置：</strong> config.yaml
-                    <br>
-                    请手动编辑配置文件后重启应用。
+                <p>选择您偏好的显示货币。系统会自动进行汇率转换。</p>
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-primary currency-btn {% if display_currency == 'USD' %}active{% endif %}" data-currency="USD">
+                        <i class="bi bi-dollar-sign"></i> 美元 (USD)
+                    </button>
+                    <button type="button" class="btn btn-outline-primary currency-btn {% if display_currency == 'CNY' %}active{% endif %}" data-currency="CNY">
+                        <i class="bi bi-yen"></i> 人民币 (CNY)
+                    </button>
                 </div>
-                <a href="/" class="btn btn-primary">返回首页</a>
+                <div class="mt-2 text-muted">
+                    <small>当前汇率: 1 USD = {{ "%.2f"|format(exchange_rate) }} CNY</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- 提供商API密钥配置 -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-key"></i> 提供商API密钥</h5>
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addProviderModal">
+                    <i class="bi bi-plus"></i> 添加提供商
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">配置各AI提供商的API密钥，用于实际的API调用监控。</p>
+                
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>提供商</th>
+                                <th>API Key</th>
+                                <th>Base URL</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="providerKeysTable">
+                            {% for key in provider_keys %}
+                            <tr>
+                                <td><span class="badge bg-info">{{ key.provider }}</span></td>
+                                <td>
+                                    <code class="api-key-display">{{ key.api_key[:8] if key.api_key else '-' }}...{{ key.api_key[-4:] if key.api_key and key.api_key|length > 12 else '' }}</code>
+                                </td>
+                                <td><small>{{ key.base_url or '-' }}</small></td>
+                                <td>
+                                    {% if key.enabled %}
+                                    <span class="badge bg-success">已启用</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">已禁用</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-warning edit-provider" 
+                                            data-provider="{{ key.provider }}"
+                                            data-api-key="{{ key.api_key or '' }}"
+                                            data-base-url="{{ key.base_url or '' }}"
+                                            data-enabled="{{ key.enabled }}">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger delete-provider" data-provider="{{ key.provider }}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">
+                                    <i class="bi bi-inbox"></i> 暂无配置，点击上方"添加提供商"按钮
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 预算提醒设置 -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-bell"></i> 预算提醒</h5>
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addBudgetModal">
+                    <i class="bi bi-plus"></i> 添加提醒
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">设置预算阈值，当成本超过阈值时发送提醒通知。</p>
+                
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>提醒类型</th>
+                                <th>阈值</th>
+                                <th>通知邮箱</th>
+                                <th>Webhook</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="budgetAlertsTable">
+                            {% for alert in budget_alerts %}
+                            <tr>
+                                <td>
+                                    {% if alert.alert_type == 'daily' %}
+                                    <span class="badge bg-primary">每日</span>
+                                    {% elif alert.alert_type == 'weekly' %}
+                                    <span class="badge bg-success">每周</span>
+                                    {% elif alert.alert_type == 'monthly' %}
+                                    <span class="badge bg-info">每月</span>
+                                    {% else %}
+                                    <span class="badge bg-warning">{{ alert.alert_type }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if alert.threshold_currency == 'USD' %}
+                                    ${{ "%.2f"|format(alert.threshold_value) }}
+                                    {% else %}
+                                    ¥{{ "%.2f"|format(alert.threshold_value) }}
+                                    {% endif %}
+                                </td>
+                                <td><small>{{ alert.notify_email or '-' }}</small></td>
+                                <td><small>{{ alert.notify_webhook[:30] if alert.notify_webhook else '-' }}{{ '...' if alert.notify_webhook and alert.notify_webhook|length > 30 }}</small></td>
+                                <td>
+                                    {% if alert.enabled %}
+                                    <span class="badge bg-success">已启用</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">已禁用</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-danger delete-alert" data-id="{{ alert.id }}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">
+                                    <i class="bi bi-inbox"></i> 暂无预算提醒，点击上方"添加提醒"按钮
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 支持的提供商列表 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-list-check"></i> 支持的提供商</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for provider, models in available_providers.items() %}
+                    <div class="col-md-4 mb-3">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <span class="badge bg-primary">{{ provider }}</span>
+                                    {% if provider in ['openai', 'anthropic', 'google', 'xai'] %}
+                                    <small class="text-muted">(USD)</small>
+                                    {% else %}
+                                    <small class="text-muted">(CNY)</small>
+                                    {% endif %}
+                                </h6>
+                                <small class="text-muted">支持模型:</small>
+                                <ul class="list-unstyled mb-0">
+                                    {% for model in models[:3] %}
+                                    <li><small>{{ model }}</small></li>
+                                    {% endfor %}
+                                    {% if models|length > 3 %}
+                                    <li><small class="text-muted">... 等 {{ models|length }} 个模型</small></li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 定价信息 -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-tags"></i> 定价参考</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">以下为参考定价（每千token），实际以官方为准。</p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>提供商</th>
+                                <th>模型</th>
+                                <th>输入价格/1K</th>
+                                <th>输出价格/1K</th>
+                                <th>币种</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>OpenAI</td><td>gpt-4o</td><td>$0.0025</td><td>$0.01</td><td>USD</td></tr>
+                            <tr><td>OpenAI</td><td>gpt-4o-mini</td><td>$0.00015</td><td>$0.0006</td><td>USD</td></tr>
+                            <tr><td>OpenAI</td><td>gpt-3.5-turbo</td><td>$0.0005</td><td>$0.0015</td><td>USD</td></tr>
+                            <tr><td>Anthropic</td><td>claude-3.5-sonnet</td><td>$0.003</td><td>$0.015</td><td>USD</td></tr>
+                            <tr><td>Anthropic</td><td>claude-3-opus</td><td>$0.015</td><td>$0.075</td><td>USD</td></tr>
+                            <tr><td>Google</td><td>gemini-1.5-pro</td><td>$0.00125</td><td>$0.005</td><td>USD</td></tr>
+                            <tr><td>xAI</td><td>grok-2</td><td>$0.002</td><td>$0.01</td><td>USD</td></tr>
+                            <tr><td>DeepSeek</td><td>deepseek-v3</td><td>$0.001</td><td>$0.002</td><td>USD</td></tr>
+                            <tr><td>百度</td><td>ernie-4.0</td><td>¥0.12</td><td>¥0.12</td><td>CNY</td></tr>
+                            <tr><td>阿里</td><td>qwen-max</td><td>¥0.04</td><td>¥0.12</td><td>CNY</td></tr>
+                            <tr><td>智谱</td><td>glm-4</td><td>¥0.1</td><td>¥0.1</td><td>CNY</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- 添加提供商模态框 -->
+    <div class="modal fade" id="addProviderModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">添加/编辑提供商</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="providerForm">
+                        <div class="mb-3">
+                            <label class="form-label">提供商名称</label>
+                            <select class="form-select" id="providerName" required>
+                                <option value="">选择提供商</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic (Claude)</option>
+                                <option value="google">Google (Gemini)</option>
+                                <option value="xai">xAI (Grok)</option>
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="baidu">百度 (文心一言)</option>
+                                <option value="alibaba">阿里 (通义千问)</option>
+                                <option value="zhipu">智谱 (GLM)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">API Key</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control api-key-input" id="providerApiKey" placeholder="sk-...">
+                                <button type="button" class="btn btn-outline-secondary toggle-visibility" onclick="togglePassword('providerApiKey')">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">API Secret (可选)</label>
+                            <input type="password" class="form-control" id="providerApiSecret" placeholder="部分提供商需要">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Base URL (可选)</label>
+                            <input type="text" class="form-control" id="providerBaseUrl" placeholder="自定义API端点">
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="providerEnabled" checked>
+                            <label class="form-check-label" for="providerEnabled">启用此配置</label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveProviderKey()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加预算提醒模态框 -->
+    <div class="modal fade" id="addBudgetModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">添加预算提醒</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="budgetForm">
+                        <div class="mb-3">
+                            <label class="form-label">提醒类型</label>
+                            <select class="form-select" id="alertType" required>
+                                <option value="daily">每日预算</option>
+                                <option value="weekly">每周预算</option>
+                                <option value="monthly">每月预算</option>
+                            </select>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label">阈值</label>
+                                <input type="number" class="form-control" id="thresholdValue" step="0.01" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label">货币</label>
+                                <select class="form-select" id="thresholdCurrency">
+                                    <option value="USD">USD ($)</option>
+                                    <option value="CNY">CNY (¥)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">通知邮箱 (可选)</label>
+                            <input type="email" class="form-control" id="notifyEmail" placeholder="your@email.com">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Webhook URL (可选)</label>
+                            <input type="url" class="form-control" id="notifyWebhook" placeholder="https://...">
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="alertEnabled" checked>
+                            <label class="form-check-label" for="alertEnabled">启用此提醒</label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveBudgetAlert()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="mt-5 py-3 bg-light text-center">
+        <div class="container">
+            <p class="mb-0">
+                AICostMonitor v2.0.0 | 
+                <a href="https://github.com/CYzhr/AICostMonitor" class="text-decoration-none">
+                    <i class="bi bi-github"></i> GitHub
+                </a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 货币切换
+        document.querySelectorAll('.currency-btn').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const currency = this.dataset.currency;
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('currency', currency);
+                    
+                    const response = await fetch('/api/config/currency', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        document.querySelectorAll('.currency-btn').forEach(b => {
+                            b.classList.remove('btn-primary', 'active');
+                            b.classList.add('btn-outline-primary');
+                        });
+                        this.classList.remove('btn-outline-primary');
+                        this.classList.add('btn-primary', 'active');
+                        showToast('已切换为 ' + currency + ' 显示', 'success');
+                    }
+                } catch (e) {
+                    showToast('保存失败: ' + e.message, 'error');
+                }
+            });
+        });
+
+        // 切换密码可见性
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const icon = input.nextElementSibling.querySelector('i');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('bi-eye');
+                icon.classList.add('bi-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('bi-eye-slash');
+                icon.classList.add('bi-eye');
+            }
+        }
+
+        // 保存提供商配置
+        async function saveProviderKey() {
+            const provider = document.getElementById('providerName').value;
+            const apiKey = document.getElementById('providerApiKey').value;
+            const apiSecret = document.getElementById('providerApiSecret').value;
+            const baseUrl = document.getElementById('providerBaseUrl').value;
+            const enabled = document.getElementById('providerEnabled').checked;
+            
+            if (!provider) {
+                showToast('请选择提供商', 'error');
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('provider', provider);
+                formData.append('api_key', apiKey);
+                formData.append('api_secret', apiSecret);
+                formData.append('base_url', baseUrl);
+                formData.append('enabled', enabled);
+                
+                const response = await fetch('/api/config/provider-key', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('保存成功', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('addProviderModal')).hide();
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast('保存失败: ' + data.error, 'error');
+                }
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        // 删除提供商配置
+        document.querySelectorAll('.delete-provider').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                if (!confirm('确定要删除此提供商配置吗？')) return;
+                
+                const provider = this.dataset.provider;
+                
+                try {
+                    const response = await fetch(`/api/config/provider-key/${provider}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showToast('删除成功', 'success');
+                        setTimeout(() => location.reload(), 1000);
+                    }
+                } catch (e) {
+                    showToast('删除失败: ' + e.message, 'error');
+                }
+            });
+        });
+
+        // 编辑提供商配置
+        document.querySelectorAll('.edit-provider').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.getElementById('providerName').value = this.dataset.provider;
+                document.getElementById('providerApiKey').value = this.dataset.apiKey;
+                document.getElementById('providerBaseUrl').value = this.dataset.baseUrl;
+                document.getElementById('providerEnabled').checked = this.dataset.enabled === '1';
+                
+                new bootstrap.Modal(document.getElementById('addProviderModal')).show();
+            });
+        });
+
+        // 保存预算提醒
+        async function saveBudgetAlert() {
+            const alertType = document.getElementById('alertType').value;
+            const thresholdValue = document.getElementById('thresholdValue').value;
+            const thresholdCurrency = document.getElementById('thresholdCurrency').value;
+            const notifyEmail = document.getElementById('notifyEmail').value;
+            const notifyWebhook = document.getElementById('notifyWebhook').value;
+            const enabled = document.getElementById('alertEnabled').checked;
+            
+            if (!thresholdValue) {
+                showToast('请输入阈值', 'error');
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('alert_type', alertType);
+                formData.append('threshold_value', thresholdValue);
+                formData.append('threshold_currency', thresholdCurrency);
+                formData.append('notify_email', notifyEmail);
+                formData.append('notify_webhook', notifyWebhook);
+                formData.append('enabled', enabled);
+                
+                const response = await fetch('/api/config/budget-alert', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('保存成功', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('addBudgetModal')).hide();
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast('保存失败: ' + data.error, 'error');
+                }
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        // 删除预算提醒
+        document.querySelectorAll('.delete-alert').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                if (!confirm('确定要删除此预算提醒吗？')) return;
+                
+                const alertId = this.dataset.id;
+                
+                try {
+                    const response = await fetch(`/api/config/budget-alert/${alertId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showToast('删除成功', 'success');
+                        setTimeout(() => location.reload(), 1000);
+                    }
+                } catch (e) {
+                    showToast('删除失败: ' + e.message, 'error');
+                }
+            });
+        });
+
+        // Toast提示
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `alert alert-${type === 'error' ? 'danger' : type} position-fixed`;
+            toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 200px;';
+            toast.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${message}`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+    </script>
 </body>
 </html>
-    
