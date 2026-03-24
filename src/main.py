@@ -514,13 +514,36 @@ class AICostMonitor:
                 }
             )
         
+        @self.app.get("/prompts", response_class=HTMLResponse)
+        async def prompts_page(request: Request):
+            """Prompt模板市场"""
+            with open("templates/prompts.html", "r", encoding="utf-8") as f:
+                html = f.read()
+            return Response(html, media_type="text/html")
+        
         @self.app.get("/config", response_class=HTMLResponse)
         async def config_page(request: Request):
             """配置页面"""
             display_currency = self.db.get_user_config("display_currency", "USD")
-            provider_keys = self.db.get_provider_keys()
-            budget_alerts = self.db.get_budget_alerts()
             available_providers = self.calculator.get_available_providers()
+            
+            # 获取已配置的API密钥
+            provider_keys = {}
+            for provider in available_providers:
+                key_info = self.db.get_provider_key(provider)
+                if key_info:
+                    provider_keys[provider] = {
+                        "provider": provider,
+                        "has_key": bool(key_info.get("api_key")),
+                        "enabled": key_info.get("enabled", 1) == 1,
+                        "base_url": key_info.get("base_url", "")
+                    }
+                else:
+                    provider_keys[provider] = {"provider": provider, "has_key": False, "enabled": True, "base_url": ""}
+            
+            # 获取预算提醒
+            budget_alerts = self.db.get_budget_alerts()
+            
             exchange_rate = self.calculator.get_exchange_rate()
             
             return self.templates.TemplateResponse(
@@ -528,26 +551,12 @@ class AICostMonitor:
                 {
                     "request": request,
                     "display_currency": display_currency,
+                    "available_providers": available_providers,
                     "provider_keys": provider_keys,
                     "budget_alerts": budget_alerts,
-                    "available_providers": available_providers,
                     "exchange_rate": exchange_rate
                 }
             )
-        
-        @self.app.get("/robots.txt")
-        async def robots(request: Request):
-            """robots.txt"""
-            return Response("User-agent: *\nAllow: /\nSitemap: http://106.13.110.26/sitemap.xml", media_type="text/plain")
-        
-        @self.app.get("/sitemap.xml")
-        async def sitemap(request: Request):
-            """网站地图"""
-            import os
-            sitemap_path = os.path.join(os.path.dirname(__file__), "..", "templates", "sitemap.xml")
-            with open(sitemap_path) as f:
-                content = f.read()
-            return Response(content, media_type="application/xml")
         
         # API端点
         

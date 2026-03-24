@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PromptMarket - 优质Prompt模板市场</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        .prompt-card { transition: all 0.2s; }
+        .prompt-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/"><i class="bi bi-lightning-charge"></i> PromptMarket</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/">返回首页</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h2 class="text-center mb-4">优质Prompt模板</h2>
+        
+        <div class="row" id="promptList">
+            <!-- 模板将通过API加载 -->
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2">加载中...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情模态框 -->
+    <div class="modal fade" id="detailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="detailTitle"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <pre id="detailContent" class="bg-light p-3"></pre>
+                    <div id="detailVariables"></div>
+                </div>
+                <div class="modal-footer">
+                    <span id="detailPrice" class="me-auto h4"></span>
+                    <button type="button" class="btn btn-primary" onclick="copyContent()">复制Prompt</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="mt-5 py-4 bg-light">
+        <div class="container text-center">
+            <p class="mb-0 text-muted">PromptMarket © 2026 | <a href="https://www.paypal.com/paypalme/Cyzhr" class="text-decoration-none">☕ 赞助</a></p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+
+    let currentContent = '';
+    
+    function renderPrompts() {
+        const list = document.getElementById('promptList');
+        list.innerHTML = prompts.map(p => `
+            <div class="col-md-4 mb-4">
+                <div class="card prompt-card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">${p.title}</h5>
+                        <p class="card-text text-muted small">${p.desc}</p>
+                        <div class="mb-2">${p.tags.map(t => `<span class="badge bg-light text-dark">${t}</span>`).join('')}</div>
+                        <div class="d-flex justify-content-between">
+                            <small><i class="bi bi-star-fill text-warning"></i> ${p.rating}</small>
+                            <small><i class="bi bi-download"></i> ${p.downloads}</small>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="${p.price===0?'text-success':'text-warning'} fw-bold">${p.price===0?'免费':'$'+p.price}</span>
+                            <button class="btn btn-sm btn-outline-primary" onclick="showDetail(${p.id})">查看</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function showDetail(id) {
+        const p = prompts.find(x => x.id === id);
+        if (!p) return;
+        document.getElementById('detailTitle').textContent = p.title;
+        document.getElementById('detailContent').textContent = p.content;
+        document.getElementById('detailVariables').innerHTML = '<strong>变量：</strong>' + p.variables.map(v => `<code>{{${v}}}</code>`).join(', ');
+        document.getElementById('detailPrice').textContent = p.price === 0 ? '免费' : '$' + p.price;
+        document.getElementById('detailPrice').className = 'me-auto h4 ' + (p.price === 0 ? 'text-success' : 'text-warning');
+        currentContent = p.content;
+        new bootstrap.Modal(document.getElementById('detailModal')).show();
+    }
+
+    function copyContent() {
+        navigator.clipboard.writeText(currentContent).then(() => alert('已复制！'));
+    }
+
+    renderPrompts();
+    </script>
+    <script src="prompts_data.js"></script>
+</body>
+</html>
