@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AICostMonitor - 真实产品界面</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .product-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .product-header {
+            background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .product-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .product-subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto 30px;
+        }
+        
+        .nav-tabs-custom {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            padding: 0 40px;
+        }
+        
+        .nav-tabs-custom .nav-link {
+            border: none;
+            color: #6c757d;
+            padding: 15px 25px;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .nav-tabs-custom .nav-link.active {
+            color: #4361ee;
+            border-bottom-color: #4361ee;
+            background: transparent;
+        }
+        
+        .tab-content {
+            padding: 40px;
+        }
+        
+        .feature-section {
+            margin-bottom: 40px;
+        }
+        
+        .feature-title {
+            font-size: 1.5rem;
+            color: #212529;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .feature-title i {
+            margin-right: 10px;
+            color: #4361ee;
+        }
+        
+        .demo-card {
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 20px;
+            background: #f8f9fa;
+            margin-bottom: 15px;
+        }
+        
+        .demo-card.active {
+            border-color: #4361ee;
+            background: rgba(67, 97, 238, 0.05);
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+        
+        .btn-try-now {
+            background: linear-gradient(135deg, #4361ee, #3a0ca3);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: transform 0.2s;
+        }
+        
+        .btn-try-now:hover {
+            transform: translateY(-2px);
+            color: white;
+            box-shadow: 0 10px 20px rgba(67, 97, 238, 0.3);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-active {
+            background-color: #4cc9f0;
+        }
+        
+        .status-warning {
+            background-color: #f8961e;
+        }
+        
+        .status-danger {
+            background-color: #f72585;
+        }
+        
+        .pricing-card {
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        .pricing-card.featured {
+            border-color: #4361ee;
+            transform: scale(1.05);
+            box-shadow: 0 10px 30px rgba(67, 97, 238, 0.2);
+        }
+        
+        .pricing-card:hover {
+            border-color: #4361ee;
+        }
+        
+        .pricing-price {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #212529;
+            margin: 20px 0;
+        }
+        
+        .pricing-period {
+            color: #6c757d;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="product-container">
+        <!-- 产品头部 -->
+        <div class="product-header">
+            <h1 class="product-title">AICostMonitor - 真正的AI成本监控产品</h1>
+            <p class="product-subtitle">专为刁钻客户设计：实时追踪、精确分析、自动优化您的AI API消费</p>
+            <a href="/dashboard" class="btn btn-try-now">
+                <i class="bi bi-lightning-charge"></i> 立即体验完整产品
+            </a>
+        </div>
+        
+        <!-- 导航标签 -->
+        <div class="nav-tabs-custom">
+            <ul class="nav nav-tabs">
+                <li class="nav-item">
+                    <a class="nav-link active" data-bs-toggle="tab" href="#features">核心功能</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="tab" href="#demo">实时演示</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="tab" href="#integrate">快速集成</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="tab" href="#pricing">定价方案</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="tab" href="#compare">竞品对比</a>
+                </li>
+            </ul>
+        </div>
+        
+        <!-- 标签内容 -->
+        <div class="tab-content">
+            <!-- 核心功能 -->
+            <div class="tab-pane fade show active" id="features">
+                <div class="row">
+                    <div class="col-md-6 feature-section">
+                        <h3 class="feature-title"><i class="bi bi-speedometer2"></i> 实时成本监控</h3>
+                        <div class="demo-card active">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="status-indicator status-active"></span>
+                                <strong>实时仪表板</strong>
+                            </div>
+                            <p class="text-muted mb-0">每秒更新成本数据，精确到每个API调用</p>
+                        </div>
+                        <div class="demo-card">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="status-indicator status-warning"></span>
+                                <strong>预算告警</strong>
+                            </div>
+                            <p class="text-muted mb-0">设置预算阈值，超支前自动通知</p>
+                        </div>
+                        <div class="demo-card">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="status-indicator status-danger"></span>
+                                <strong>异常检测</strong>
+                            </div>
+                            <p class="text-muted mb-0">自动识别异常调用模式，防止费用泄露</p>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6 feature-section">
+                        <h3 class="feature-title"><i class="bi bi-bar-chart"></i> 深度分析</h3>
+                        <div class="demo-card active">
+                            <strong>成本趋势分析</strong>
+                            <p class="text-muted mb-0">按日/周/月分析消费趋势，预测未来支出</p>
+                        </div>
+                        <div class="demo-card">
+                            <strong>提供商对比</strong>
+                            <p class="text-muted mb-0">比较不同AI提供商的价格和性能</p>
+                        </div>
+                        <div class="demo-card">
+                            <strong>优化建议</strong>
+                            <p class="text-muted mb-0">智能推荐成本优化方案，最高可节省40%</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-6 feature-section">
+                        <h3 class="feature-title"><i class="bi bi-people"></i> 团队协作</h3>
+                        <div class="demo-card active">
+                            <strong>多团队管理</strong>
+                            <p class="text-muted mb-0">为不同团队和项目设置独立预算</p>
+                        </div>
+                        <div class="demo-card">
+                            <strong>权限控制</strong>
+                            <p class="text-muted mb-0">细粒度权限管理，控制数据访问</p>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6 feature-section">
+                        <h3 class="feature-title"><i class="bi bi-code-slash"></i> 开发者友好</h3>
+                        <div class="demo-card active">
+                            <strong>零侵入集成</strong>
+                            <p class="text-muted mb-0">一行代码即可开始监控，无需修改现有代码</p>
+                        </div>
+                        <div class="demo-card">
+                            <strong>丰富API</strong>
+                            <p class="text-muted mb-0">完整的REST API和Webhook支持</p>
+                        </div>
+                        <div class="demo-card">
+                            <strong>多语言SDK</strong>
+                            <p class="text-muted mb-0">Python、JavaScript、Java、Go等</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 实时演示 -->
+            <div class="tab-pane fade" id="demo">
+                <div class="text-center mb-4">
+                    <h3>实时数据演示</h3>
+                    <p class="text-muted">以下为实时监控数据（模拟刁钻客户实际使用场景）</p>
+                </div>
+                
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-center p-3">
+                            <div class="text-primary fs-4 fw-bold">$532.87</div>
+                            <div class="text-muted small">本月总成本</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center p-3">
+                            <div class="text-success fs-4 fw-bold">24,587</div>
+                            <div class="text-muted small">API调用次数</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center p-3">
+                            <div class="text-warning fs-4 fw-bold">78%</div>
+                            <div class="text-muted small">预算使用率</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center p-3">
+                            <div class="text-danger fs-4 fw-bold">3</div>
+                            <div class="text-muted small">待处理告警</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>演示提示：</strong> 这是产品界面演示。点击上方"立即体验完整产品"按钮进入真实功能界面。
+                </div>
+            </div>
+            
+            <!-- 快速集成 -->
+            <div class="tab-pane fade" id="integrate">
+                <h3 class="mb-4">一分钟开始使用</h3>
+                
+                <div class="mb-4">
+                    <h5>1. 安装SDK</h5>
+                    <div class="code-block">
+                        <span style="color: #569cd6;">pip</span> <span style="color: #d4d4d4;">install</span> aicostmonitor
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h5>2. 初始化监控</h5>
+                    <div class="code-block">
+                        <span style="color: #569cd6;">import</span> <span style="color: #d4d4d4;">aicostmonitor</span><br><br>
+                        <span style="color: #d4d4d4;"># 一行代码开启监控</span><br>
+                        <span style="color: #d4d4d4;">aicostmonitor.init(</span><br>
+                        <span style="color: #d4d4d4;">&nbsp;&nbsp;&nbsp;&nbsp;api_key</span><span style="color: #ce9178;">=</span><span style="color: #ce9178;">"your-api-key"</span><span style="color: #d4d4d4;">,</span><br>
+                        <span style="color: #d4d4d4;">&nbsp;&nbsp;&nbsp;&nbsp;project</span><span style="color: #ce9178;">=</span><span style="color: #ce9178;">"production"</span><span style="color: #d4d4d4;">,</span><br>
+                        <span style="color: #d4d4d4;">&nbsp;&nbsp;&nbsp;&nbsp;alert_email</span><span style="color: #ce9178;">=</span><span style="color: #ce9178;">"team@company.com"</span><br>
+                        <span style="color: #d4d4d4;">)</span>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h5>3. 自动开始追踪</h5>
+                    <div class="code-block">
+                        <span style="color: #d4d4d4;"># 无需修改现有代码，自动追踪所有AI API调用</span><br>
+                        <span style="color: #569cd6;">import</span> <span style="color: #d4d4d4;">openai</span><br>
+                        <span style="color: #569cd6;">import</span> <span style="color: #d4d4d4;">anthropic</span><br><br>
+                        <span style="color: #d4d4d4;"># 这些调用会被自动监控和计价</span><br>
+                        <span style="color: #d4d4d4;">response</span> <span style="color: #ce9178;">=</span> <span style="color: #d4d4d4;">openai.ChatCompletion.create(</span><span style="color: #ce9178;">...</span><span style="color: #d4d4d4;">)</span><br>
+                        <span style="color: #d4d4d4;">message</span> <span style="color: #ce9178;">=</span> <span style="color: #d4d4d4;">anthropic.Anthropic().messages.create(</span><span style="color: #ce9178;">...</span><span style="color: #d4d4d4;">)</span>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    支持OpenAI、Anthropic、Google、百度、DeepSeek等10+提供商，自动识别和计价。
+                </div>
+            </div>
+            
+            <!-- 定价方案 -->
+            <div class="tab-pane fade" id="pricing">
+                <div class="text-center mb-5">
+                    <h3 class="mb-3">透明定价，按需付费</h3>
+                    <p class="text-muted">没有隐藏费用，只为真实价值付费</p>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-4 mb-4">
+                        <div class="pricing-card h-100">
+                            <h4>免费版</h4>
+                            <div class="pricing-price">$0<span class="pricing-period">/月</span></div>
+                            <ul class="list-unstyled mb-4">
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 基础成本监控</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 10,000 API调用/月</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 7天数据保留</li>
+                                <li class="mb-2"><i class="bi bi-x text-muted me-2"></i> 无团队协作</li>
+                                <li class="mb-2"><i class="bi bi-x text-muted me-2"></i> 无预算告警</li>
+                            </ul>
+                            <button class="btn btn-outline-primary w-100">开始免费使用</button>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4 mb-4">
+                        <div class="pricing-card featured h-100">
+                            <span class="badge bg-primary mb-3">最受欢迎</span>
+                            <h4>专业版</h4>
+                            <div class="pricing-price">$49<span class="pricing-period">/月</span></div>
+                            <ul class="list-unstyled mb-4">
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 高级成本分析</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 100,000 API调用/月</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 智能预算告警</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 5人团队协作</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 30天数据保留</li>
+                            </ul>
+                            <button class="btn btn-primary w-100">立即升级</button>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4 mb-4">
+                        <div class="pricing-card h-100">
+                            <h4>企业版</h4>
+                            <div class="pricing-price">$199<span class="pricing-period">/月</span></div>
+                            <ul class="list-unstyled mb-4">
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 无限API调用</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 定制化分析报告</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 无限团队成员</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 90天数据保留</li>
+                                <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 优先技术支持</li>
+                            </ul>
+                            <button class="btn btn-outline-primary w-100">联系销售</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 竞品对比 -->
+            <div class="tab-pane fade" id="compare">
+                <h3 class="mb-4">为什么选择AICostMonitor？</h3>
+                
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead>
+                            <tr class="table-light">
+                                <th style="width: 25%;">功能对比</th>
+                                <th class="text-center" style="width: 25%;">AICostMonitor</th>
+                                <th class="text-center" style="width: 25%;">LiteLLM Proxy</th>
+                                <th class="text-center" style="width: 25%;">OpenCost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>零侵入集成</strong></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-x-lg text-danger fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-x-lg text-danger fs-5"></i></td>
+                            </tr>
+                            <tr>
+                                <td><strong>实时成本监控</strong></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-dash-lg text-muted fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                            </tr>
+                            <tr>
+                                <td><strong>智能预算告警</strong></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-x-lg text-danger fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-dash-lg text-muted fs-5"></i></td>
+                            </tr>
+                            <tr>
+                                <td><strong>成本优化建议</strong></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-x-lg text-danger fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-x-lg text-danger fs-5"></i></td>
+                            </tr>
+                            <tr>
+                                <td><strong>多团队协作</strong></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-dash-lg text-muted fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-dash-lg text-muted fs-5"></i></td>
+                            </tr>
+                            <tr>
+                                <td><strong>中文提供商支持</strong></td>
+                                <td class="text-center"><i class="bi bi-check-lg text-success fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-dash-lg text-muted fs-5"></i></td>
+                                <td class="text-center"><i class="bi bi-x-lg text-danger fs-5"></i></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="alert alert-success">
+                    <i class="bi bi-star me-2"></i>
+                    <strong>核心优势：</strong> AICostMonitor专注于解决刁钻客户的实际痛点，而不仅仅是技术功能堆砌。
+                </div>
+            </div>
+        </div>
+        
+        <!-- 页脚 -->
+        <div class="border-top p-4 text-center text-muted">
+            <p class="mb-2">© 2026 AICostMonitor - 专为刁钻客户设计的AI成本监控解决方案</p>
+            <p class="mb-0">
+                <a href="/dashboard" class="text-decoration-none me-3">立即体验完整产品</a>
+                <a href="https://github.com/CYzhr/AICostMonitor" class="text-decoration-none me-3">GitHub</a>
+                <a href="#" class="text-decoration-none">文档</a>
+            </p>
+        </div>
+    </div>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 激活标签页
+        document.addEventListener('DOMContentLoaded', function() {
+            var triggerTabList = [].slice.call(document.querySelectorAll('.nav-tabs-custom .nav-link'))
+            triggerTabList.forEach(function (triggerEl) {
+                var tabTrigger = new bootstrap.Tab(triggerEl)
+                triggerEl.addEventListener('click', function (event) {
+                    event.preventDefault()
+                    tabTrigger.show()
+                })
+            })
+        });
+    </script>
+</body>
+</html>
